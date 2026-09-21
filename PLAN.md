@@ -253,6 +253,7 @@ GPIO 25 for the PICAN2):
 start_file=start4.elf
 fixup_file=fixup4.dat
 over_voltage=2
+usb_max_current_enable=1
 
 boot_delay=1
 kernel=Image
@@ -286,6 +287,12 @@ dtparam=i2c_csi_dsi0=on
 dtparam=spi=on
 dtoverlay=mcp2515-can0,oscillator=16000000,interrupt=25,spimaxfrequency=10000000
 ```
+
+> **On `usb_max_current_enable=1`:** at boot the Pi 5 caps *total* downstream USB current
+> across all ports at **600 mA** unless it can confirm a 5 V/5 A supply via PD negotiation.
+> This line forces the full **1.6 A** budget instead. Needed if you power from a plain
+> 5 V/5 A buck converter (no PD controller) and want to run a USB hub + webcam for vision.
+> Only set it if your supply can actually deliver; otherwise the Pi browns out and resets.
 
 > **On the `dtoverlay=dwc2,dr_mode=peripheral` line:** this is inherited from the real
 > Systemcore, where the USB-C port is a dedicated data port that presents USB gadget
@@ -342,6 +349,50 @@ sudo systemctl disable --now limelight_canbusprocess
 
 Leave the other three alone - `limelight_canbusloadmon`, `limelight_canbussniffer` and
 `limelight_canbuswatchdog` are read-only monitors and do not fight the interface.
+
+---
+
+## 5c. Optional: drop the vcan wait from `robot.service`
+
+`robot.service` waits for all five CAN buses to report `state UP` before starting. `vcan`
+interfaces always report `state UNKNOWN`, so the check never passes and start is delayed by
+15 seconds - on every boot and every deploy. It is advisory only, so the robot still starts.
+
+**Fix** - edit `/etc/systemd/system/robot.service` and narrow the loop to the bus you
+actually have:
+
+```bash
+sudo nano /etc/systemd/system/robot.service
+```
+
+Change the bus list in `ExecStartPre` from:
+
+```
+for can in can_s0 can_s1 can_s2 can_s3 can_s4; do
+```
+
+to just the physical one:
+
+```
+for can in can_s0; do
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart robot
+```
+
+Now the wait ends as soon as the PICAN2 is up instead of timing out.
+
+> Alternatively, accept `UNKNOWN` as valid by changing `grep -q "state UP"` to
+> `grep -qE "state (UP|UNKNOWN)"`, which keeps all five buses in the check. Either works;
+> narrowing to `can_s0` is the smaller edit.
+
+> An OS update will restore the stock unit and bring the 15 s delay back. A drop-in at
+> `/etc/systemd/system/robot.service.d/10-vcan-ok.conf` (with an empty `ExecStartPre=` line
+> first, to clear the inherited one) survives updates if you prefer.
 
 ---
 
