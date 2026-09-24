@@ -369,7 +369,10 @@ public class Collector implements Mechanism {
         }).named("Collector Neutral");
     }
 
-    /** Deploys the pivot then runs the rollers until canceled. */
+    /**
+     * Deploys the pivot then runs the rollers until canceled. The raised priority replaces v2's
+     * InterruptionBehavior.kCancelIncoming: lower priority collector commands can't interrupt it.
+     */
     public Command collectCommand(DoubleSupplier power) {
         return run(co -> {
             deployPivot();
@@ -377,7 +380,7 @@ public class Collector implements Mechanism {
                 setCollectorPower(power.getAsDouble());
                 co.yield();
             }
-        }).whenCanceled(this::stopCollector).named("Collect");
+        }).whenCanceled(this::stopCollector).withPriority(Command.DEFAULT_PRIORITY + 1).named("Collect");
     }
 
     public Command runCollectorWheels(DoubleSupplier power){

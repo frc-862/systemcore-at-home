@@ -4,31 +4,19 @@
 
 package frc.robot;
 
-import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.auto.NamedCommands;
-
-import org.wpilib.math.util.MathUtil;
-import org.wpilib.math.linalg.VecBuilder;
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Trigger;
+import org.wpilib.driverstation.GenericHID;
+import org.wpilib.driverstation.RobotState;
+import org.wpilib.driverstation.XboxController;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.linalg.VecBuilder;
+import org.wpilib.math.util.MathUtil;
 import static org.wpilib.units.Units.MetersPerSecond;
-import org.wpilib.driverstation.DriverStation;
-import org.wpilib.driverstation.GenericHID;
-import org.wpilib.hardware.power.PowerDistribution;
-import org.wpilib.hardware.power.PowerDistribution.ModuleType;
-import org.wpilib.driverstation.XboxController;
-import org.wpilib.smartdashboard.SendableChooser;
-import org.wpilib.command3.Command;
-import org.wpilib.command3.Command.InterruptionBehavior;
-import org.wpilib.command3.InstantCommand;
-import org.wpilib.command3.ParallelCommandGroup;
-import org.wpilib.command3.SequentialCommandGroup;
-import org.wpilib.command3.StartEndCommand;
-import org.wpilib.command3.WaitUntilCommand;
-import org.wpilib.command3.Trigger;
+import static org.wpilib.units.Units.Seconds;
 import frc.robot.constants.DriveConstants;
-import frc.robot.constants.FieldConstants;
 import frc.robot.constants.LEDConstants;
 import frc.robot.constants.LEDConstants.LED_STATES;
 import frc.robot.constants.RobotMap;
@@ -37,22 +25,18 @@ import frc.robot.mechanisms.Cannon.CannonConstants;
 import frc.robot.mechanisms.Collector;
 import frc.robot.mechanisms.Collector.CollectorConstants;
 import frc.robot.mechanisms.Hood;
-import frc.robot.mechanisms.Hood.HoodConstants;
 import frc.robot.mechanisms.Indexer;
 import frc.robot.mechanisms.Indexer.IndexerConstants;
-import frc.robot.mechanisms.MapleSim;
-import frc.robot.mechanisms.PhotonVision;
 import frc.robot.mechanisms.Shooter;
 import frc.robot.mechanisms.Shooter.ShooterConstants;
 import frc.robot.mechanisms.Swerve;
-import frc.robot.mechanisms.Telemetry;
+import frc.robot.mechanisms.SwerveTelemetry;
 import frc.robot.mechanisms.Turret;
 import frc.robot.mechanisms.Turret.TurretConstants;
 import frc.util.leds.Color;
 import frc.util.leds.LEDBehaviorFactory;
 import frc.util.leds.LEDBooleanSupplier;
-import frc.util.leds.LEDSubsystem;
-import frc.util.shuffleboard.LightningShuffleboard;
+import frc.util.leds.LEDMechanism;
 
 
 public class RobotContainer {
@@ -66,26 +50,18 @@ public class RobotContainer {
     private final Turret turret;
     private final Hood hood;
     private final Shooter shooter;
-    private final LEDSubsystem leds;
-    public final PowerDistribution pdh;
-    @SuppressWarnings("unused")
-    private final PhotonVision vision;
-    private final Telemetry logger;
+    private final LEDMechanism leds;
+    private final SwerveTelemetry logger;
     private final Cannon cannon;
-
-    private SendableChooser<Command> autoChooser = new SendableChooser<>();
 
     public RobotContainer() {
         driver = new XboxController(RobotMap.DRIVER_PORT);
         copilot = new XboxController(RobotMap.COPILOT_PORT);
 
         drivetrain = DriveConstants.createDrivetrain();
-        // Update pose from vision before other subsystems so they use updated pose
-        vision = new PhotonVision(drivetrain);
 
-        logger = new Telemetry(DriveConstants.MaxSpeed.in(MetersPerSecond));
-        leds = new LEDSubsystem(LED_STATES.values().length, LEDConstants.LED_COUNT, LEDConstants.LED_PWM_PORT);
-        pdh = new PowerDistribution(RobotMap.PDH, ModuleType.kRev);
+        logger = new SwerveTelemetry(DriveConstants.MaxSpeed.in(MetersPerSecond));
+        leds = new LEDMechanism(LED_STATES.values().length, LEDConstants.LED_COUNT, LEDConstants.LED_PWM_PORT);
 
         collector = new Collector();
         indexer = new Indexer();
@@ -93,15 +69,9 @@ public class RobotContainer {
         hood = new Hood();
         turret = new Turret(drivetrain);
         cannon = new Cannon(shooter, turret, hood, drivetrain, indexer);
-        
-
-        if (Robot.isSimulation()) {
-            new MapleSim(drivetrain, collector, indexer, turret, hood, shooter);
-        }
 
         configureDefaultCommands();
         configureBindings();
-        configureNamedCommands();
         configureLeds();
     }
 
@@ -118,14 +88,15 @@ public class RobotContainer {
                         VecBuilder.fill(-driver.getLeftY(), -driver.getLeftX()),
                         DriveConstants.JOYSTICK_DEADBAND
                     ),
-                        DriveConstants.CONTROLLER_POW).times(driver.getRightTriggerAxis() > DriveConstants.TRIGGER_DEADBAND 
+                        DriveConstants.CONTROLLER_POW).times(driver.getRightTrigger() > DriveConstants.TRIGGER_DEADBAND
                         ? DriveConstants.SLOW_MODE_MULT : 1.0), () -> MathUtil.copyDirectionPow(MathUtil.applyDeadband((-driver.getRightX()),
                         DriveConstants.JOYSTICK_DEADBAND), DriveConstants.CONTROLLER_POW)
-                        * (driver.getRightTriggerAxis() > DriveConstants.TRIGGER_DEADBAND ? DriveConstants.SLOW_MODE_MULT : 1.0)));
+                        * (driver.getRightTrigger() > DriveConstants.TRIGGER_DEADBAND ? DriveConstants.SLOW_MODE_MULT : 1.0)));
 
-
-        shooter.setDefaultCommand(cannon.shootOTF());
-//         collector.setDefaultCommand(collector.neutralPivotCommand());
+        // v3 default commands may only require their own mechanism, so the shooter can no longer
+        // default to cannon.shootOTF() (which also requires turret and hood). Use a shooter-only
+        // version without the on-the-fly lead compensation.
+        shooter.setDefaultCommand(shooter.runShootCommand(() -> ShooterConstants.VELOCITY_MAP.get(cannon.getTargetDistance())));
         hood.setDefaultCommand(cannon.hoodAim());
         turret.setDefaultCommand(cannon.turretAim());
     }
@@ -135,102 +106,87 @@ public class RobotContainer {
         /* Driver */
         new Trigger(driver::getXButton).whileTrue(drivetrain.brakeCommand());
 
-        // new Trigger(driver::getYButton).whileTrue(turret.zero());
-        
-        // TODO: Bind OTF to LB and Climb AA to RB
-        new Trigger(() -> copilot.getBButton() && !cannon.isInNoPassingZone()).whileTrue(cannon.shootOTF().alongWith(cannon.indexWhenOnTarget()));
+        new Trigger(() -> copilot.getBButton() && !cannon.isInNoPassingZone())
+            .whileTrue(Command.parallel(cannon.shootOTF(), cannon.indexWhenOnTarget()).named("Shoot OTF And Index"));
 
         // change biases for the driver
-        new Trigger(() -> driver.getPOV() == DriveConstants.DPAD_DOWN).onTrue(shooter.changeBiasCommand(ShooterConstants.BIAS_DELTA.unaryMinus()));
-        new Trigger(() -> driver.getPOV() == DriveConstants.DPAD_UP).onTrue(shooter.changeBiasCommand(ShooterConstants.BIAS_DELTA));
-        new Trigger(() -> driver.getPOV() == DriveConstants.DPAD_LEFT).onTrue(shooter.clearBiasCommand());
-        new Trigger(() -> driver.getPOV() == DriveConstants.DPAD_RIGHT).onTrue(shooter.clearBiasCommand());
-        
+        new Trigger(driver::getDpadDownButton).onTrue(shooter.changeBiasCommand(ShooterConstants.BIAS_DELTA.unaryMinus()));
+        new Trigger(driver::getDpadUpButton).onTrue(shooter.changeBiasCommand(ShooterConstants.BIAS_DELTA));
+        new Trigger(driver::getDpadLeftButton).onTrue(shooter.clearBiasCommand());
+        new Trigger(driver::getDpadRightButton).onTrue(shooter.clearBiasCommand());
+
         new Trigger(() -> driver.getLeftBumperButton() && !driver.getRightBumperButton()).onTrue(turret.changeBias(TurretConstants.BIAS_DELTA));
         new Trigger(() -> driver.getRightBumperButton() && !driver.getLeftBumperButton()).onTrue(turret.changeBias(TurretConstants.BIAS_DELTA.unaryMinus()));
         new Trigger(() -> driver.getLeftBumperButton() && driver.getRightBumperButton()).onTrue(turret.clearBias());
 
-        // reset the field-centric heading
-        new Trigger(() -> (driver.getStartButton() && driver.getBackButton()))
+        // reset the field-centric heading. Start and Back are now called Menu and View.
+        new Trigger(() -> (driver.getMenuButton() && driver.getViewButton()))
             .onTrue(drivetrain.resetFieldCentricCommand())
             .onTrue(leds.enableStateWithTimeout(LEDConstants.LED_STATES.SEED_FIELD_FORWARD.id(), 1));
 
         drivetrain.registerTelemetry(logger::telemeterize);
 
-        new Trigger(() -> driver.getLeftTriggerAxis() > DriveConstants.TRIGGER_DEADBAND).whileTrue(collector.driverStowPivotCommand());
+        new Trigger(() -> driver.getLeftTrigger() > DriveConstants.TRIGGER_DEADBAND).whileTrue(collector.driverStowPivotCommand());
 
         new Trigger(driver::getBButton).toggleOnTrue(turret.manual());
 
-        /* Copilot */ 
+        /* Copilot */
         new Trigger(() -> drivetrain.isNearTrench()).whileTrue(hood.retractCommand());
-        // new Trigger(copilot::getXButton).whileTrue(hood.retractCommand().withInterruptBehavior(InterruptionBehavior.kCancelIncoming));
 
         new Trigger(copilot::getLeftBumperButton).whileTrue(indexer.indexCommand(-IndexerConstants.SPINDEXDER_POWER,
             -IndexerConstants.TRANSFER_POWER));
         new Trigger(copilot::getRightBumperButton).whileTrue(indexer.indexCommand(IndexerConstants.SPINDEXDER_POWER,
             IndexerConstants.TRANSFER_POWER));
 
-        new Trigger(copilot::getStartButton).onTrue(collector.stowPivotCommand());
-    
-        new Trigger(() -> (copilot.getRightTriggerAxis() > DriveConstants.TRIGGER_DEADBAND || copilot.getLeftTriggerAxis() > DriveConstants.TRIGGER_DEADBAND)  && !(driver.getLeftTriggerAxis() > DriveConstants.TRIGGER_DEADBAND))
-            .whileTrue(collector.collectCommand(() -> (copilot.getRightTriggerAxis() - copilot.getLeftTriggerAxis()) *  CollectorConstants.COLLECT_MULT).withInterruptBehavior(InterruptionBehavior.kCancelIncoming));
+        new Trigger(copilot::getMenuButton).onTrue(collector.stowPivotCommand());
 
-        new Trigger(copilot::getBackButton).whileTrue(turret.manual()); // disable turret
+        // Interruption behavior kCancelIncoming is replaced by command priorities (see collectCommand)
+        new Trigger(() -> (copilot.getRightTrigger() > DriveConstants.TRIGGER_DEADBAND || copilot.getLeftTrigger() > DriveConstants.TRIGGER_DEADBAND)  && !(driver.getLeftTrigger() > DriveConstants.TRIGGER_DEADBAND))
+            .whileTrue(collector.collectCommand(() -> (copilot.getRightTrigger() - copilot.getLeftTrigger()) *  CollectorConstants.COLLECT_MULT));
+
+        new Trigger(copilot::getViewButton).whileTrue(turret.manual()); // disable turret
 
         new Trigger(() -> Math.abs(copilot.getRightX()) > TurretConstants.MANUAL_CONTROL_DEADBAND).whileTrue(turret.setManualPowerCommand(() -> copilot.getRightX()));
 
         // Temp Cand shots
-        //RIGHT_, LEFT_, and MIDDLE_ are all set to 0, so temp shots wont work right now
-        new Trigger(() -> copilot.getPOV() == DriveConstants.DPAD_RIGHT).whileTrue(cannon.createCandShotCommand(CannonConstants.RIGHT_SHOT).deadlineFor(rumble()));
-        new Trigger(() -> copilot.getPOV() == DriveConstants.DPAD_LEFT).whileTrue(cannon.createCandShotCommand(CannonConstants.LEFT_SHOT).deadlineFor(rumble()));
-        new Trigger(() -> copilot.getPOV() == DriveConstants.DPAD_UP).whileTrue(cannon.createCandShotCommand(CannonConstants.MIDDLE_SHOT).deadlineFor(rumble()));
-            
-        //  new Trigger(() -> copilot.getPOV() == DriveConstants.DPAD_DOWN).whileTrue(
-        //     shooter.shootCommand(() -> RotationsPerSecond.of(LightningShuffleboard.getDouble("Shooter", "RPS", 65)))
-        //     .alongWith(hood.hoodCommand(() -> Degrees.of(LightningShuffleboard.getDouble("Hood", "Setpoint (Degrees)", 80))))
-        //     .andThen(indexer.autoIndex(() -> LightningShuffleboard.getDouble("Indexer", "Power", IndexerConstants.SPINDEXDER_POWER), 
-        //     () -> LightningShuffleboard.getDouble("Indexer", "Transfer Power", IndexerConstants.TRANSFER_POWER)))
-        //     .finallyDo(shooter::stop));
-
-        // new Trigger(() -> copilot.getPOV() == DriveConstants.DPAD_DOWN).whileTrue(turret.setAngleCommand(() -> Degrees.of(LightningShuffleboard.getDouble("Turret", "Setpoint (Degrees)", 0))));
-
-        // new Trigger(() -> copilot.getPOV() == DriveConstants.DPAD_DOWN).whileTrue(hood.hoodCommand(() -> 
-        //     Degrees.of(LightningShuffleboard.getDouble("Hood", "Setpoint (Degrees)", 80))));
+        new Trigger(copilot::getDpadRightButton).whileTrue(Command.race(cannon.createCandShotCommand(CannonConstants.RIGHT_SHOT), rumble()).named("Right Shot"));
+        new Trigger(copilot::getDpadLeftButton).whileTrue(Command.race(cannon.createCandShotCommand(CannonConstants.LEFT_SHOT), rumble()).named("Left Shot"));
+        new Trigger(copilot::getDpadUpButton).whileTrue(Command.race(cannon.createCandShotCommand(CannonConstants.MIDDLE_SHOT), rumble()).named("Middle Shot"));
 
         new Trigger(() -> (hood.isOnTarget() && shooter.isOnTarget() && turret.isOnTarget()))
-        .whileTrue(new StartEndCommand(() -> copilot.setRumble(GenericHID.RumbleType.kBothRumble, 1d), () -> copilot.setRumble(GenericHID.RumbleType.kBothRumble, 0d)));
+            .whileTrue(Command.noRequirements(co -> {
+                setCopilotRumble(1);
+                co.park();
+            }).whenCanceled(() -> setCopilotRumble(0)).named("On Target Rumble"));
 
-        // new Trigger(() -> DriverStation.isEnabled()).onTrue(hood.zeroCommand());
+        // autoIndex stops the indexer when canceled, so the old onFalse(stop) binding isn't needed
+        new Trigger(copilot::getAButton).whileTrue(indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER));
 
-        new Trigger(copilot::getAButton).whileTrue(indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER)).onFalse(new InstantCommand(() -> indexer.stop()));
+        // Unjam: reverse briefly, then feed. A v2 withTimeout().andThen() chain is straight-line code.
+        new Trigger(copilot::getYButton).whileTrue(indexer.run(co -> {
+            indexer.setPower(-0.5);
+            co.wait(Seconds.of(0.1));
+            indexer.setPower(1);
+            co.park();
+        }).whenCanceled(indexer::stop).named("Unjam"));
 
-        new Trigger(copilot::getYButton).whileTrue(indexer.indexCommand(-0.5).withTimeout(0.1).andThen(indexer.indexCommand(1)));
-
-        new Trigger(driver::getXButton).whileTrue(new InstantCommand(() -> drivetrain.resetPose(new Pose2d(12.566, 0.713, new Rotation2d(0.057)))));
-    }
-    
-    private void configureNamedCommands() {
-        NamedCommands.registerCommand("LED_SHOOT", leds.enableStateWithTimeout(LED_STATES.SHOOT.id(), 2));
-        NamedCommands.registerCommand("LED_COLLECT", leds.enableStateWithTimeout(LED_STATES.COLLECT.id(), 2));
-        NamedCommands.registerCommand("LED_CLIMB", leds.enableStateWithTimeout(LED_STATES.CLIMB.id(), 2));
-
-        NamedCommands.registerCommand("MOVE_TO_TOWER", drivetrain.autoAlign(FieldConstants.getPose(FieldConstants.TOWER_POSITION)));
-        NamedCommands.registerCommand("SMART_SHOOT", cannon.shootOTF().alongWith(hood.ignoreRetractCommand(), indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER)).deadlineFor(leds.enableState(LED_STATES.SHOOT.id())));
-        NamedCommands.registerCommand("COLLECT", collector.collectCommand(() -> CollectorConstants.COLLECT_POWER).deadlineFor(leds.enableState(LED_STATES.COLLECT.id())));
-        NamedCommands.registerCommand("DEPLOY_COLLECTOR", collector.deployPivotCommand());
-        NamedCommands.registerCommand("STOW_COLLECTOR", collector.stowPivotCommand());
-        NamedCommands.registerCommand("WAIT_UNTIL_DEPLOYED", new WaitUntilCommand(collector::isDeployed));
-        NamedCommands.registerCommand("WAIT_UNTIL_STOWED", new WaitUntilCommand(collector::isStowed));
-        NamedCommands.registerCommand("COLLECTOR_WHEELS", collector.runCollectorWheels(() -> CollectorConstants.COLLECT_POWER));
-        NamedCommands.registerCommand("STOW_AND_COLLECTOR_WHEELS", new ParallelCommandGroup(collector.stowPivotCommand(), collector.runCollectorWheels(() -> CollectorConstants.COLLECT_POWER)));
-        NamedCommands.registerCommand("RETRACT_HOOD", hood.retractCommand());
-        
-        autoChooser = AutoBuilder.buildAutoChooser();
-        LightningShuffleboard.send("Auton", "Auto Chooser", autoChooser);
+        new Trigger(driver::getXButton).whileTrue(Command.noRequirements(co -> drivetrain.resetPose(new Pose2d(12.566, 0.713, new Rotation2d(0.057)))).named("Reset Pose"));
     }
 
+    /**
+     * Without PathPlanner and SendableChooser there is a single hard-coded auto: the old
+     * SMART_SHOOT named command. (OpModeRobot with @Autonomous classes is the 2027 replacement
+     * for an auto chooser.)
+     */
     public Command getAutonomousCommand() {
-        return autoChooser.getSelected();
+        return Command.race(
+            Command.parallel(
+                cannon.shootOTF(),
+                hood.ignoreRetractCommand(),
+                indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER)
+            ).named("Smart Shoot Parts"),
+            leds.enableState(LED_STATES.SHOOT.id())
+        ).named("Smart Shoot Auto");
     }
 
     private void configureLeds() {
@@ -238,8 +194,7 @@ public class RobotContainer {
 
         leds.setBehavior(LED_STATES.TEST.id(), LEDBehaviorFactory.testStrip(LEDConstants.stripAll,
                 () -> turret.getMaxLimitSwitch(),
-                () -> turret.getZeroLimitSwitch(),
-                () -> vision.getMacMiniConnection()
+                () -> turret.getZeroLimitSwitch()
         ));
         leds.setBehavior(LED_STATES.TURRET_MANUAL.id(), LEDBehaviorFactory.blink(LEDConstants.stripAll, 2, Color.GREY));
         leds.setBehavior(LED_STATES.VISION_BAD.id(), LEDBehaviorFactory.solid(LEDConstants.stripUnderglow, Color.RED));
@@ -259,15 +214,15 @@ public class RobotContainer {
 
         new Trigger(turret::getManual).whileTrue(leds.enableState(LED_STATES.TURRET_MANUAL.id()));
 
-        new Trigger(() -> !turret.getZeroed() && DriverStation.isDisabled()).whileTrue(leds.enableState(LED_STATES.TURRET_BAD.id()));
+        new Trigger(() -> !turret.getZeroed() && RobotState.isDisabled()).whileTrue(leds.enableState(LED_STATES.TURRET_BAD.id()));
 
         new Trigger(new LEDBooleanSupplier(turret::getZeroed)).whileFalse(leds.enableState(LED_STATES.TURRET_BAD.id())); // turn off turret bad LED state once turret is zeroed
 
         // Turn off the "vision bad" LED state once the drivetrain has moved away from the origin, indicating we likely have a valid pose estimate.
-        new Trigger(new LEDBooleanSupplier(() -> (DriverStation.isDisabled() && drivetrain.getPose().getTranslation().getDistance(new Translation2d()) < 0.1))).whileTrue(leds.enableState(LED_STATES.VISION_BAD.id()));
+        new Trigger(new LEDBooleanSupplier(() -> (RobotState.isDisabled() && drivetrain.getPose().getTranslation().getDistance(new Translation2d()) < 0.1))).whileTrue(leds.enableState(LED_STATES.VISION_BAD.id()));
 
-        new Trigger(new LEDBooleanSupplier(DriverStation::isDisabled)).whileTrue(leds.enableState(LED_STATES.TEST.id()));
-        
+        new Trigger(new LEDBooleanSupplier(RobotState::isDisabled)).whileTrue(leds.enableState(LED_STATES.TEST.id()));
+
         //Turn on the NEAR_HUB light when it is near the HUB.
         new Trigger(() -> cannon.isNearHub()).whileTrue(leds.enableState(LED_STATES.NEAR_HUB.id()));
 
@@ -275,15 +230,22 @@ public class RobotContainer {
         new Trigger(() -> cannon.isInNoPassingZone()).whileTrue(leds.enableState(LED_STATES.NEAR_HUB.id()));
     }
 
-        /**
+    private void setCopilotRumble(double value) {
+        // RumbleType.kBothRumble is gone; set each motor
+        copilot.setRumble(GenericHID.RumbleType.LEFT_RUMBLE, value);
+        copilot.setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, value);
+    }
+
+    /**
      * It waits until everything except turret is on target to start the rumble.
      * @return The command
      */
     public Command rumble(){
-        return new SequentialCommandGroup(
-            new WaitUntilCommand(() -> (hood.isOnTarget() && shooter.isOnTarget() && !turret.isOnTarget())),
-            new StartEndCommand(() -> copilot.setRumble(GenericHID.RumbleType.kBothRumble, 1d), () -> copilot.setRumble(GenericHID.RumbleType.kBothRumble, 0d))
-        );
+        return Command.noRequirements(co -> {
+            co.waitUntil(() -> (hood.isOnTarget() && shooter.isOnTarget() && !turret.isOnTarget()));
+            setCopilotRumble(1);
+            co.park();
+        }).whenCanceled(() -> setCopilotRumble(0)).named("Rumble");
     }
 
 }
