@@ -4,13 +4,10 @@
 
 package frc.util.leds;
 
-import edu.wpi.first.util.datalog.BooleanArrayLogEntry;
-import org.wpilib.system.DataLogManager;
 import org.wpilib.command2.Command;
 import org.wpilib.command2.StartEndCommand;
 import org.wpilib.command2.SubsystemBase;
-import frc.robot.Robot;
-import frc.util.shuffleboard.LightningShuffleboard;
+import org.wpilib.telemetry.Telemetry;
 
 public class LEDSubsystem extends SubsystemBase {
     private final LEDController leds;
@@ -19,7 +16,6 @@ public class LEDSubsystem extends SubsystemBase {
     private final LEDBehavior[] ledBehaviors;
     private LEDBehavior defaultBehavior;
 
-    private BooleanArrayLogEntry stateLog;
 
     private double loop = 0;
 
@@ -39,11 +35,6 @@ public class LEDSubsystem extends SubsystemBase {
 
         defaultBehavior = new LEDBehavior() { @Override public void apply(LEDController leds) {} };
 
-        initLogging();
-    }
-
-    private void initLogging() {
-        stateLog = new BooleanArrayLogEntry(DataLogManager.getLog(), "/LEDs/States");
     }
 
     /**
@@ -139,15 +130,7 @@ public class LEDSubsystem extends SubsystemBase {
             applyLEDS();
         }
 
-        if (Robot.isNTEnabled()) {
-            LightningShuffleboard.setBoolArray("LEDs", "EnabledStates", enabledStates);
-        }
-
-        updateLogging();
-    }
-
-    private void updateLogging() {
-        stateLog.append(enabledStates);
+        Telemetry.log("LEDs/EnabledStates", enabledStates);
     }
 
     private void applyLEDS() {
