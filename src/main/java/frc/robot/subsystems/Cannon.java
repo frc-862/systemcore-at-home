@@ -23,25 +23,22 @@ import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.Time;
-import edu.wpi.first.util.datalog.DataLog;
-import edu.wpi.first.util.datalog.DoubleArrayLogEntry;
-import edu.wpi.first.util.datalog.DoubleLogEntry;
-import edu.wpi.first.util.datalog.StructLogEntry;
-import org.wpilib.system.DataLogManager;
-import org.wpilib.driverstation.DriverStation;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.command2.Command;
 import org.wpilib.command2.ParallelCommandGroup;
 import org.wpilib.command2.RunCommand;
 import org.wpilib.command2.SequentialCommandGroup;
 import org.wpilib.command2.SubsystemBase;
 import org.wpilib.command2.WaitUntilCommand;
-import frc.robot.Robot;
 import frc.robot.constants.FieldConstants;
 import frc.robot.constants.FieldConstants.Target;
 import frc.robot.subsystems.Indexer.IndexerConstants;
 import frc.robot.subsystems.Shooter.ShooterConstants;
 import frc.util.AllianceHelpers;
-import frc.util.shuffleboard.LightningShuffleboard;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
+import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.Tunables;
 import frc.util.units.ThunderMap;
 
 public class Cannon extends SubsystemBase {
@@ -84,9 +81,10 @@ public class Cannon extends SubsystemBase {
     // Target storage
     private Target storedTarget;
 
-    private DoubleArrayLogEntry targetPositionLog;
-    private DoubleLogEntry distToTargetLog;
-    private StructLogEntry<Pose2d> futurePoseLog;
+    private final TelemetryTable telemetry = Telemetry.getTable("Cannon");
+
+    // Replaces LightningShuffleboard.getDouble(): a value editable from the dashboard
+    private final TunableDouble shooterDistanceBiasInches = Tunables.addDouble("Cannon/Shooter Distance Bias", 8);
 
     /**
      * Creates a new cannon
@@ -105,16 +103,6 @@ public class Cannon extends SubsystemBase {
         this.indexer = indexer;
 
         this.storedTarget = FieldConstants.GOAL_POSITION;
-
-        initLogging();
-    }
-
-    private void initLogging() {
-        DataLog log = DataLogManager.getLog();
-
-        targetPositionLog = new DoubleArrayLogEntry(log, "/Cannon/TargetPosition");
-        distToTargetLog = new DoubleLogEntry(log, "/Cannon/DistanceToTarget");
-        futurePoseLog = StructLogEntry.create(log, "/Cannon/FuturePose", Pose2d.struct);
     }
 
     @Override
@@ -132,22 +120,12 @@ public class Cannon extends SubsystemBase {
             storedTarget =  new Target(FieldConstants.ZONE_POSITION_BLUE_BOTTOM, FieldConstants.ZONE_POSITION_RED_BOTTOM);
         }
 
-        updateLogging();
+        telemetry.log("Target Position", getTargetTranslation());
+        telemetry.log("Distance To Target", getTargetDistance());
+        telemetry.log("Turret Position", new Pose2d(getShooterTranslation(), new Rotation2d()));
+        telemetry.log("In No Passing Zone", isInNoPassingZone());
     }
 
-    private void updateLogging() {
-        targetPositionLog.append(new double[]{getTargetTranslation().getX(), getTargetTranslation().getY()});
-        distToTargetLog.append(getTargetDistance().in(Meters));
-
-        if (Robot.isNTEnabled()) {
-            LightningShuffleboard.setTranslation2d("Cannon", "Target Position", FieldConstants.getTargetData(getTarget()));
-            // LightningShuffleboard.setTranslation2d("Cannon", "Target Position", getTarget());
-            LightningShuffleboard.setPose2d("Cannon", "Target Pose", new Pose2d(getTargetTranslation(), new Rotation2d()));
-            LightningShuffleboard.setDouble("Cannon", "Distance To Target", getTargetDistance().in(Meters));
-            LightningShuffleboard.setPose2d("Cannon", "Turret Position", new Pose2d(getShooterTranslation(), new Rotation2d()));
-            LightningShuffleboard.setBool("Cannon", "In No Passing Zone", isInNoPassingZone());
-        }
-    }
 
         
 
@@ -185,7 +163,7 @@ public class Cannon extends SubsystemBase {
     }
 
     public Angle getTargetAngle(Pose2d pose) {
-        return Radians.of(getTargetTranslation().minus(getShooterTranslation(pose)).getAngle().getRadians());
+        return Radians.of(getTargetTranslation().minus(getShooterTranslation(pose)).getAngle().orElse(Rotation2d.ZERO).getRadians());
     }
 
     public Angle getTargetAngle() {
@@ -337,8 +315,8 @@ public class Cannon extends SubsystemBase {
 
             Distance mapDist = futureDist;
 
-            if (DriverStation.isTeleop()) {
-                mapDist = futureDist.minus(Inches.of(LightningShuffleboard.getDouble("Cannon", "Shooter Distance Bias", 8)));
+            if (RobotState.isTeleop()) {
+                mapDist = futureDist.minus(Inches.of(shooterDistanceBiasInches.get()));
             }
            
             Angle hoodAngle = Hood.HoodConstants.HOOD_MAP.get(mapDist);
@@ -347,11 +325,7 @@ public class Cannon extends SubsystemBase {
             hood.setPosition(hoodAngle);
             shooter.setVelocity(shooterVelocity);
 
-            if (!DriverStation.isFMSAttached()) {
-                LightningShuffleboard.setPose2d("Cannon", "Future Pose", futurePose);
-            }
-
-            futurePoseLog.append(futurePose);
+            telemetry.log("Future Pose", futurePose);
 
             turret.turretAim(new Pose2d(getShooterTranslation(futurePose), futurePose.getRotation()), getTarget(), getRobotAngularVelocity(), getHubAngularVelocity(futurePose));
       }, turret, shooter, hood);
@@ -404,35 +378,16 @@ public class Cannon extends SubsystemBase {
      * @param pose the pose to use for the calculation
      */
     public AngularVelocity getHubAngularVelocity(Pose2d pose) {
-        // double velocityMagnitude = Math.sqrt(Math.pow(drivetrain.getCurrentRobotChassisVelocities().vxMetersPerSecond, 2) + Math.pow(drivetrain.getCurrentRobotChassisVelocities().vyMetersPerSecond, 2));
-        // double velocityAngle = Math.atan2(drivetrain.getCurrentRobotChassisVelocities().vyMetersPerSecond, drivetrain.getCurrentRobotChassisVelocities().vxMetersPerSecond);
-
-        // double[] velocityVector = {velocityMagnitude, velocityAngle};
-
-        // double robotHubMagnitude = getShooterTranslation().getDistance(FieldConstants.getTargetData(FieldConstants.GOAL_POSITION));
-        // double robotHubAngle = Math.atan2(FieldConstants.getTargetData(FieldConstants.GOAL_POSITION).getY() - getShooterTranslation().getY(), FieldConstants.getTargetData(FieldConstants.GOAL_POSITION).getX() - getShooterTranslation().getX());
-
-        // double[] robotHubVector = {robotHubMagnitude, robotHubAngle};
-
-        // double[] robotHubOrthogonalVector = {1, robotHubAngle + Math.PI / 2};
-
-        // double orthagVectorScalar = velocityMagnitude * Math.sin(velocityAngle - robotHubAngle);
-
-        // double circumference = 2 * Math.PI * robotHubMagnitude;
-
-        // double angularVelocity = orthagVectorScalar / circumference;
-        // return angularVelocity;
-
         double robotTargetAngle = getTargetAngle(pose).in(Radians);
         
-        Translation2d fieldRelativeVelocity = new Translation2d(drivetrain.getWallCorrectedChassisVelocities().vxMetersPerSecond, drivetrain.getWallCorrectedChassisVelocities().vyMetersPerSecond).rotateBy(drivetrain.getPose().getRotation());
+        Translation2d fieldRelativeVelocity = new Translation2d(drivetrain.getWallCorrectedChassisVelocities().vx, drivetrain.getWallCorrectedChassisVelocities().vy).rotateBy(drivetrain.getPose().getRotation());
 
         double hubRotation = (-fieldRelativeVelocity.getX() * Math.sin(robotTargetAngle) + fieldRelativeVelocity.getY() * Math.cos(robotTargetAngle)) / getTargetDistance(pose).in(Meters);
         return RadiansPerSecond.of(hubRotation);
     }
 
     public AngularVelocity getRobotAngularVelocity() {
-        return RadiansPerSecond.of(drivetrain.getWallCorrectedChassisVelocities().omegaRadiansPerSecond);
+        return RadiansPerSecond.of(drivetrain.getWallCorrectedChassisVelocities().omega);
     }
 
     public Pose2d getFuturePoseFromTime(Time time) {
@@ -443,9 +398,9 @@ public class Cannon extends SubsystemBase {
     
         Pose2d pose = drivetrain.getPose();
 
-        double filteredOmegaRadPerSec = speeds.omegaRadiansPerSecond;
-        double filteredXVel = speeds.vxMetersPerSecond - 0.22;
-        double filteredYVel = speeds.vyMetersPerSecond;
+        double filteredOmegaRadPerSec = speeds.omega;
+        double filteredXVel = speeds.vx - 0.22;
+        double filteredYVel = speeds.vy;
 
         double rrXVel = (-filteredOmegaRadPerSec * Cannon.CannonConstants.SHOOTER_TRANSLATION.getY());
         double rrYVel = (filteredOmegaRadPerSec * Cannon.CannonConstants.SHOOTER_TRANSLATION.getX());
@@ -456,6 +411,6 @@ public class Cannon extends SubsystemBase {
             0
         );
 
-        return pose.exp(twist);
+        return pose.plus(twist.exp());
     }
 }
