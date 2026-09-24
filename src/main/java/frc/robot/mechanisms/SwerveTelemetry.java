@@ -1,61 +1,27 @@
 package frc.robot.mechanisms;
 
-import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.swerve.SwerveDrivetrain.SwerveDriveState;
 
-// import org.wpilib.math.geometry.Pose2d;
-// import org.wpilib.math.kinematics.ChassisVelocities;
-// import org.wpilib.math.kinematics.SwerveModulePosition;
-// import org.wpilib.math.kinematics.SwerveModuleState;
-import edu.wpi.first.networktables.DoubleArrayPublisher;
-// import edu.wpi.first.networktables.DoublePublisher;
-import edu.wpi.first.networktables.NetworkTable;
-import edu.wpi.first.networktables.NetworkTableInstance;
-import edu.wpi.first.networktables.StringPublisher;
-// import edu.wpi.first.networktables.StructArrayPublisher;
-// import edu.wpi.first.networktables.StructPublisher;
+import org.wpilib.math.kinematics.SwerveModuleVelocity;
+import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.smartdashboard.Mechanism2d;
 import org.wpilib.smartdashboard.MechanismLigament2d;
-import org.wpilib.smartdashboard.SmartDashboard;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
 import org.wpilib.util.Color;
 import org.wpilib.util.Color8Bit;
-import frc.robot.Robot;
 
-public class Telemetry {
+/**
+ * Logs the swerve drive state. Previously split across NetworkTables publishers, SmartDashboard
+ * and CTRE SignalLogger; now everything goes through one TelemetryTable.
+ */
+public class SwerveTelemetry {
     private final double MaxSpeed;
 
-    /**
-     * Construct a telemetry object, with the specified max speed of the robot
-     * 
-     * @param maxSpeed Maximum speed in meters per second
-     */
-    public Telemetry(double maxSpeed) {
-        MaxSpeed = maxSpeed;
-        SignalLogger.start();
-
-        /* Set up the module state Mechanism2d telemetry */
-        for (int i = 0; i < 4; ++i) {
-            SmartDashboard.putData("Module " + i, m_moduleMechanisms[i]);
-        }
-    }
-
-    /* What to publish over networktables for telemetry */
-    private final NetworkTableInstance inst = NetworkTableInstance.getDefault();
-
-    /* Robot swerve drive state */
-    // private final NetworkTable driveStateTable = inst.getTable("DriveState");
-    // private final StructPublisher<Pose2d> drivePose = driveStateTable.getStructTopic("Pose", Pose2d.struct).publish();
-    // private final StructPublisher<ChassisVelocities> driveSpeeds = driveStateTable.getStructTopic("Speeds", ChassisVelocities.struct).publish();
-    // private final StructArrayPublisher<SwerveModuleState> driveModuleStates = driveStateTable.getStructArrayTopic("ModuleStates", SwerveModuleState.struct).publish();
-    // private final StructArrayPublisher<SwerveModuleState> driveModuleTargets = driveStateTable.getStructArrayTopic("ModuleTargets", SwerveModuleState.struct).publish();
-    // private final StructArrayPublisher<SwerveModulePosition> driveModulePositions = driveStateTable.getStructArrayTopic("ModulePositions", SwerveModulePosition.struct).publish();
-    // private final DoublePublisher driveTimestamp = driveStateTable.getDoubleTopic("Timestamp").publish();
-    // private final DoublePublisher driveOdometryFrequency = driveStateTable.getDoubleTopic("OdometryFrequency").publish();
+    private final TelemetryTable table = Telemetry.getTable("DriveState");
 
     /* Robot pose for field positioning */
-    private final NetworkTable table = inst.getTable("Pose");
-    private final DoubleArrayPublisher fieldPub = table.getDoubleArrayTopic("robotPose").publish();
-    private final StringPublisher fieldTypePub = table.getStringTopic(".type").publish();
+    private final Field2d field = new Field2d();
 
     /* Mechanisms to represent the swerve module states */
     private final Mechanism2d[] m_moduleMechanisms = new Mechanism2d[] {
@@ -83,51 +49,38 @@ public class Telemetry {
             .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.kWhite))),
     };
 
-    private final double[] m_poseArray = new double[3];
-    private final double[] m_moduleStatesArray = new double[8];
-    private final double[] m_moduleTargetsArray = new double[8];
+    /**
+     * Construct a telemetry object, with the specified max speed of the robot
+     *
+     * @param maxSpeed Maximum speed in meters per second
+     */
+    public SwerveTelemetry(double maxSpeed) {
+        MaxSpeed = maxSpeed;
+    }
 
-    /** Accept the swerve drive state and telemeterize it to SmartDashboard and SignalLogger. 
-     * 
-     * @param state The swerve drive state to telemeterize
+    /** Accept the swerve drive state and log it.
+     *
+     * <p>This is called from CTRE's odometry thread, not the main robot loop.
+     *
+     * @param state The swerve drive state to log
     */
     public void telemeterize(SwerveDriveState state) {
-        /* Telemeterize the swerve drive state */
-        // drivePose.set(state.Pose);
-        // driveSpeeds.set(state.Speeds);
-        // driveModuleStates.set(state.ModuleStates);
-        // driveModuleTargets.set(state.ModuleTargets);
-        // driveModulePositions.set(state.ModulePositions);
-        // driveTimestamp.set(state.Timestamp);
-        // driveOdometryFrequency.set(1.0 / state.OdometryPeriod);
+        /* Struct-serializable types are logged directly */
+        table.log("Pose", state.Pose);
+        table.log("Velocity", state.Velocity);
+        table.log("ModuleVelocities", state.ModuleVelocities, SwerveModuleVelocity.struct);
+        table.log("ModuleTargets", state.ModuleTargets, SwerveModuleVelocity.struct);
+        table.log("OdometryPeriod", state.OdometryPeriod);
 
-        /* Also write to log file */
-        m_poseArray[0] = state.Pose.getX();
-        m_poseArray[1] = state.Pose.getY();
-        m_poseArray[2] = state.Pose.getRotation().getDegrees();
+        /* Field2d and Mechanism2d are TelemetryLoggables */
+        field.setRobotPose(state.Pose);
+        table.log("Field", field);
+
         for (int i = 0; i < 4; ++i) {
-            m_moduleStatesArray[i*2 + 0] = state.ModuleStates[i].angle.getRadians();
-            m_moduleStatesArray[i*2 + 1] = state.ModuleStates[i].speedMetersPerSecond;
-            m_moduleTargetsArray[i*2 + 0] = state.ModuleTargets[i].angle.getRadians();
-            m_moduleTargetsArray[i*2 + 1] = state.ModuleTargets[i].speedMetersPerSecond;
-        }
-
-        SignalLogger.writeDoubleArray("DriveState/Pose", m_poseArray);
-        SignalLogger.writeDoubleArray("DriveState/ModuleStates", m_moduleStatesArray);
-        SignalLogger.writeDoubleArray("DriveState/ModuleTargets", m_moduleTargetsArray);
-        SignalLogger.writeDouble("DriveState/OdometryPeriod", state.OdometryPeriod, "seconds");
-
-        /* Telemeterize the pose to a Field2d */
-        fieldTypePub.set("Field2d");
-        if (Robot.isReal()) {
-            fieldPub.set(m_poseArray);
-        }
-
-        /* Telemeterize each module state to a Mechanism2d */
-        for (int i = 0; i < 4; ++i) {
-            m_moduleSpeeds[i].setAngle(state.ModuleStates[i].angle);
-            m_moduleDirections[i].setAngle(state.ModuleStates[i].angle);
-            m_moduleSpeeds[i].setLength(state.ModuleStates[i].speedMetersPerSecond / (2 * MaxSpeed));
+            m_moduleSpeeds[i].setAngle(state.ModuleVelocities[i].angle);
+            m_moduleDirections[i].setAngle(state.ModuleVelocities[i].angle);
+            m_moduleSpeeds[i].setLength(state.ModuleVelocities[i].velocity / (2 * MaxSpeed));
+            table.log("Module " + i, m_moduleMechanisms[i]);
         }
     }
 }
