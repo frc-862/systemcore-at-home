@@ -4,46 +4,36 @@
 
 package frc.util.leds;
 
-import edu.wpi.first.util.datalog.BooleanArrayLogEntry;
-import org.wpilib.system.DataLogManager;
+import static org.wpilib.units.Units.Seconds;
+
 import org.wpilib.command3.Command;
-import org.wpilib.command3.StartEndCommand;
-import org.wpilib.command3.SubsystemBase;
-import frc.robot.Robot;
-import frc.util.shuffleboard.LightningShuffleboard;
+import org.wpilib.command3.Mechanism;
+import org.wpilib.command3.Scheduler;
+import org.wpilib.telemetry.Telemetry;
 
-public class LEDSubsystem extends SubsystemBase {
+public class LEDMechanism implements Mechanism {
     private final LEDController leds;
-
     private final boolean[] enabledStates;
     private final LEDBehavior[] ledBehaviors;
     private LEDBehavior defaultBehavior;
 
-    private BooleanArrayLogEntry stateLog;
-
     private double loop = 0;
 
     /**
-     * Creates a new nLEDs. </p>
-     * nLEDs is a subsystem for managing complex sets of LED behaviors.
+     * Creates a new LEDMechanism. </p>
+     * LEDMechanism manages complex sets of LED behaviors.
      *
      * @param numStates The number of different LED states to manage.
      * @param numLEDs The number of LEDs in the LED controller.
      * @param pwmPort The PWM port the LED controller is connected to.
      */
-    public LEDSubsystem(int numStates, int numLEDs, int pwmPort) {
+    public LEDMechanism(int numStates, int numLEDs, int pwmPort) {
         enabledStates = new boolean[numStates];
         ledBehaviors = new LEDBehavior[numStates];
-
         leds = new LEDController(numLEDs, pwmPort);
-
         defaultBehavior = new LEDBehavior() { @Override public void apply(LEDController leds) {} };
 
-        initLogging();
-    }
-
-    private void initLogging() {
-        stateLog = new BooleanArrayLogEntry(DataLogManager.getLog(), "/LEDs/States");
+        Scheduler.getDefault().addPeriodic(this::periodic);
     }
 
     /**
@@ -68,20 +58,20 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Creates a command that enables a specific state. </p>
      * This command will enable the state when started and disable it when ended.
+     * It doesn't require the LED mechanism so many states can be enabled at once.
+     * v3 commands keep running while disabled, so there is no ignoringDisable().
      *
      * @param stateID The ID of the state to set.
      * @param inverted Shows whether the state is enabled or not.
      * @return A command that enables the specified state.
      */
     public Command enableState(int stateID, boolean inverted) {
-        return new StartEndCommand(
-            () -> {
-                enabledStates[stateID] = !inverted;
-            },
-            () -> {
-                enabledStates[stateID] = inverted;
-            }
-        ).ignoringDisable(true);
+        return Command.noRequirements(co -> {
+            enabledStates[stateID] = !inverted;
+            co.park();
+        })
+        .whenCanceled(() -> enabledStates[stateID] = inverted)
+        .named("LED State " + stateID);
     }
 
     /**
@@ -100,15 +90,15 @@ public class LEDSubsystem extends SubsystemBase {
     }
 
     /**
-     * Creates a command that enables a specific state. </p>
-     * This command will enable the state when started and disable it when ended.
+     * Creates a command that enables a specific state for a length of time.
      *
      * @param stateID The ID of the state to set.
      * @param timeoutSeconds The length of time to enable the state for.
      * @return A command that enables the specified state.
      */
     public Command enableStateWithTimeout(int stateID, double timeoutSeconds) {
-        return enableState(stateID).withTimeout(timeoutSeconds);
+        // withTimeout() races against the parked command, which cancels it and runs whenCanceled
+        return enableState(stateID).withTimeout(Seconds.of(timeoutSeconds));
     }
 
     /**
@@ -131,23 +121,13 @@ public class LEDSubsystem extends SubsystemBase {
         return enabledStates[stateID];
     }
 
-    @Override
-    public void periodic() {
+    private void periodic() {
         loop++;
-
         if (loop % 10 == 0) {
             applyLEDS();
         }
 
-        if (Robot.isNTEnabled()) {
-            LightningShuffleboard.setBoolArray("LEDs", "EnabledStates", enabledStates);
-        }
-
-        updateLogging();
-    }
-
-    private void updateLogging() {
-        stateLog.append(enabledStates);
+        Telemetry.log("LEDs/EnabledStates", enabledStates);
     }
 
     private void applyLEDS() {
@@ -158,7 +138,6 @@ public class LEDSubsystem extends SubsystemBase {
             behavior.apply(leds);
         }
         }
-        
         leds.apply();
     }
 }

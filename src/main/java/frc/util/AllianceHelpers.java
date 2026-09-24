@@ -1,6 +1,8 @@
 package frc.util;
 
-import org.wpilib.driverstation.DriverStation;
+import org.wpilib.driverstation.Alliance;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.RobotState;
 
 public class AllianceHelpers {
 
@@ -8,7 +10,7 @@ public class AllianceHelpers {
      * @return true if blue alliance or unknown, false if red alliance
     */
     public static boolean isBlueAlliance() {
-        return (DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue) == DriverStation.Alliance.Blue);
+        return (MatchState.getAlliance().orElse(Alliance.BLUE) == Alliance.BLUE);
     }
 
     /**
@@ -20,18 +22,18 @@ public class AllianceHelpers {
 
     public boolean isHubActive() {
         // Hub is always enabled in autonomous.
-        if (DriverStation.isAutonomousEnabled()) {
+        if (RobotState.isAutonomousEnabled()) {
             return true;
         }
 
         // At this point, if we're not teleop enabled, there is no hub.
-        if (!DriverStation.isTeleopEnabled()) {
+        if (!RobotState.isTeleopEnabled()) {
             return false;
         }
 
         // We're teleop enabled, compute.
-        double matchTime = DriverStation.getMatchTime();
-        String gameData = DriverStation.getGameSpecificMessage();
+        double matchTime = MatchState.getMatchTime();
+        String gameData = MatchState.getGameData().orElse("");
         
         // If we have no game data, we cannot compute, assume hub is active, as its likely early in teleop.
         if (gameData.isEmpty()) {

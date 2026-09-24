@@ -21,7 +21,6 @@ public class LEDController {
 
         leds.setLength(numLEDs);
 
-        leds.start();
     }
 
     public void apply() {
