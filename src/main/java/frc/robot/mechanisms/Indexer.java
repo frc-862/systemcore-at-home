@@ -11,6 +11,11 @@ import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.sim.TalonFXSimState;
 import com.ctre.phoenix6.sim.TalonFXSimState.MotorType;
 
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Mechanism;
+import org.wpilib.command3.Scheduler;
+import org.wpilib.framework.RobotBase;
+import org.wpilib.framework.TimedRobot;
 import org.wpilib.math.numbers.N1;
 import org.wpilib.math.system.Models;
 import static org.wpilib.units.Units.Amps;
@@ -20,23 +25,14 @@ import static org.wpilib.units.Units.Volts;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
 import org.wpilib.units.measure.Time;
-import edu.wpi.first.util.datalog.DataLog;
-import edu.wpi.first.util.datalog.DoubleLogEntry;
-import org.wpilib.system.DataLogManager;
-import org.wpilib.system.RobotController;
 import org.wpilib.simulation.LinearSystemSim;
-import org.wpilib.command3.Command;
-import org.wpilib.command3.InstantCommand;
-import org.wpilib.command3.RunCommand;
-import org.wpilib.command3.StartEndCommand;
-import org.wpilib.command3.SubsystemBase;
-import org.wpilib.command3.WaitCommand;
-import frc.robot.Robot;
+import org.wpilib.system.RobotController;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
 import frc.robot.constants.RobotMap;
 import frc.util.hardware.ThunderBird;
-import frc.util.shuffleboard.LightningShuffleboard;
 
-public class Indexer extends SubsystemBase {
+public class Indexer implements Mechanism {
 
     public class IndexerConstants {
         // spindexer
@@ -59,7 +55,7 @@ public class Indexer extends SubsystemBase {
         public static final boolean TRANSFER_MOTOR_BRAKE_MODE = true; // temp
 
         public static final double TRANSFER_POWER = 0.8;
-        public static final Current TRANSFER_SUPPLY_LIMIT = Amps.of(40); // temp 
+        public static final Current TRANSFER_SUPPLY_LIMIT = Amps.of(40); // temp
         public static final boolean TRANSFER_SUPPLY_LIMIT_ENABLE = true; // temp
 
         // sim
@@ -75,10 +71,9 @@ public class Indexer extends SubsystemBase {
     private LinearSystemSim<N1, N1, N1> spindexerSim;
     private TalonFXSimState motorSim;
 
-    private DoubleLogEntry transferLog;
-    private DoubleLogEntry spindexerLog; 
+    private final TelemetryTable telemetry = Telemetry.getTable("Indexer");
 
-    /** Creates a new Spindexer Subsystem. */
+    /** Creates a new Spindexer Mechanism. */
     public Indexer() {
         spindexerMotor = new ThunderBird(RobotMap.SPINDEXER, RobotMap.CAN_BUS,
             IndexerConstants.SPINDEXER_MOTOR_INVERTED, IndexerConstants.SPINDEXER_MOTOR_STATOR_LIMIT, IndexerConstants.SPINDEXER_MOTOR_BRAKE_MODE);
@@ -100,43 +95,31 @@ public class Indexer extends SubsystemBase {
         spindexerMotor.applyConfig(spindexerConfig);
         transferMotor.applyConfig(transferConfig);
 
-        if (Robot.isSimulation()) {
-            spindexerSim = new LinearSystemSim<N1, N1, N1>(Models.identifyVelocitySystem(IndexerConstants.SPINDEXER_SIM_kV,
+        if (RobotBase.isSimulation()) {
+            spindexerSim = new LinearSystemSim<N1, N1, N1>(Models.flywheelFromSysId(IndexerConstants.SPINDEXER_SIM_kV,
                 IndexerConstants.SPINDEXER_SIM_kA));
             motorSim = spindexerMotor.getSimState();
             motorSim.setMotorType(MotorType.KrakenX44);
         }
 
-        initLogging();
+        Scheduler.getDefault().addPeriodic(this::periodic);
+        if (RobotBase.isSimulation()) {
+            Scheduler.getDefault().addPeriodic(this::simulationPeriodic);
+        }
     }
 
-    private void initLogging() {
-        DataLog log = DataLogManager.getLog();
-
-        transferLog = new DoubleLogEntry(log, "/Indexer/Transfer Velocity");
-        spindexerLog = new DoubleLogEntry(log, "/Indexer/Spindexer Velocity");
+    private void periodic() {
+        telemetry.log("Transfer Velocity", transferMotor.getVelocity().getValue());
+        telemetry.log("Spindexer Velocity", spindexerMotor.getVelocity().getValue());
     }
 
-    @Override 
-    public void periodic() {
-        updateLogging();
-    }
-
-    private void updateLogging() {
-        transferLog.append(transferMotor.getVelocity().getValueAsDouble());
-        spindexerLog.append(spindexerMotor.getVelocity().getValueAsDouble());
-    }
-
-    @Override
-    public void simulationPeriodic() {
+    private void simulationPeriodic() {
         motorSim.setSupplyVoltage(RobotController.getBatteryVoltage());
 
         spindexerSim.setInput(motorSim.getMotorVoltageMeasure().in(Volts));
-        spindexerSim.update(Robot.kDefaultPeriod);
+        spindexerSim.update(TimedRobot.DEFAULT_PERIOD);
 
         motorSim.setRotorVelocity(spindexerSim.getOutput(0));
-
-        LightningShuffleboard.setDouble("Spindexer", "Velocity", getSpindexerVelocity().in(RotationsPerSecond));
     }
 
     /**
@@ -214,17 +197,30 @@ public class Indexer extends SubsystemBase {
      * @return the command for running the indexer
      */
     public Command indexCommand(double power) {
-        return new StartEndCommand(() -> setPower(power), () -> stop(), this);
+        return run(co -> {
+            setPower(power);
+            co.park();
+        }).whenCanceled(this::stop).named("Index");
     }
 
     public Command indexCommand(DoubleSupplier spindexerPower, DoubleSupplier transferPower) {
-        return new StartEndCommand(() -> setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble()), this::stop);
+        return run(co -> {
+            setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble());
+            co.park();
+        }).whenCanceled(this::stop).named("Index");
     }
 
+    /**
+     * Starts the transfer, waits for it to spin up, then runs the spindexer too.
+     * The v2 sequence of InstantCommand, WaitCommand and StartEndCommand is plain code here.
+     */
     public Command autoIndex(DoubleSupplier spindexerPower, DoubleSupplier transferPower) {
-        return new InstantCommand(() -> setTransferPower(transferPower.getAsDouble()))
-            .andThen(new WaitCommand(IndexerConstants.SPINDEXER_DELAY))
-            .andThen(indexCommand(spindexerPower, transferPower));
+        return run(co -> {
+            setTransferPower(transferPower.getAsDouble());
+            co.wait(IndexerConstants.SPINDEXER_DELAY);
+            setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble());
+            co.park();
+        }).whenCanceled(this::stop).named("Auto Index");
     }
 
     public Command autoIndex(double spindexerPower, double transferPower) {
@@ -236,6 +232,6 @@ public class Indexer extends SubsystemBase {
     }
 
     public Command transferCommand(DoubleSupplier transferPower) {
-        return new RunCommand(() -> setTransferPower(transferPower.getAsDouble()));
+        return runRepeatedly(() -> setTransferPower(transferPower.getAsDouble())).named("Transfer");
     }
 }
