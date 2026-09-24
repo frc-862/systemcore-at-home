@@ -200,14 +200,14 @@ public class Indexer implements Mechanism {
         return run(co -> {
             setPower(power);
             co.park();
-        }).whenCanceled(this::stop).named("Index");
+        }).whenCanceled(() -> stop()).named("Index");
     }
 
     public Command indexCommand(DoubleSupplier spindexerPower, DoubleSupplier transferPower) {
         return run(co -> {
             setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble());
             co.park();
-        }).whenCanceled(this::stop).named("Index");
+        }).whenCanceled(() -> stop()).named("Index");
     }
 
     /**
@@ -220,7 +220,7 @@ public class Indexer implements Mechanism {
             co.wait(IndexerConstants.SPINDEXER_DELAY);
             setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble());
             co.park();
-        }).whenCanceled(this::stop).named("Auto Index");
+        }).whenCanceled(() -> stop()).named("Auto Index");
     }
 
     public Command autoIndex(double spindexerPower, double transferPower) {

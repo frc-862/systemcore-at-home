@@ -168,7 +168,7 @@ public class RobotContainer {
             co.wait(Seconds.of(0.1));
             indexer.setPower(1);
             co.park();
-        }).whenCanceled(indexer::stop).named("Unjam"));
+        }).whenCanceled(() -> indexer.stop()).named("Unjam"));
 
         new Trigger(driver::getXButton).whileTrue(Command.noRequirements(co -> drivetrain.resetPose(new Pose2d(12.566, 0.713, new Rotation2d(0.057)))).named("Reset Pose"));
     }

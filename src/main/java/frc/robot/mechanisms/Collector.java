@@ -357,7 +357,7 @@ public class Collector implements Mechanism {
                 stowPivot();
                 co.yield();
             }
-        }).whenCanceled(this::deployPivot).named("Collector Driver Stow");
+        }).whenCanceled(() -> deployPivot()).named("Collector Driver Stow");
     }
 
     public Command neutralPivotCommand() {
@@ -380,7 +380,7 @@ public class Collector implements Mechanism {
                 setCollectorPower(power.getAsDouble());
                 co.yield();
             }
-        }).whenCanceled(this::stopCollector).withPriority(Command.DEFAULT_PRIORITY + 1).named("Collect");
+        }).whenCanceled(() -> stopCollector()).withPriority(Command.DEFAULT_PRIORITY + 1).named("Collect");
     }
 
     public Command runCollectorWheels(DoubleSupplier power){

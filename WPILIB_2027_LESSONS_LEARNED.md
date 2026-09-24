@@ -118,7 +118,7 @@ startEnd(() -> setPower(p), this::stop);
 run(co -> {
     setPower(p);
     co.park();              // wait here until canceled
-}).whenCanceled(this::stop).named("Index");
+}).whenCanceled(() -> stop()).named("Index");
 ```
 
 ### finallyDo
@@ -130,7 +130,7 @@ new RunCommand(() -> stowPivot()).finallyDo(() -> deployPivot());
 // 2027
 Command.noRequirements(co -> {
     while (true) { stowPivot(); co.yield(); }
-}).whenCanceled(this::deployPivot).named("Driver Stow");
+}).whenCanceled(() -> deployPivot()).named("Driver Stow");
 ```
 
 ### FunctionalCommand (init / execute / end)
@@ -143,7 +143,7 @@ new FunctionalCommand(this::deploy, this::spin, i -> stop(), () -> false, this);
 run(co -> {
     deploy();                                  // init
     while (true) { spin(); co.yield(); }       // execute
-}).whenCanceled(this::stop).named("Collect");  // end
+}).whenCanceled(() -> stop()).named("Collect");  // end
 ```
 
 ### Waiting for a condition
@@ -193,7 +193,7 @@ run(co -> {
     co.wait(Seconds.of(0.25));
     setPower(s, t);
     co.park();
-}).whenCanceled(this::stop).named("Auto Index");
+}).whenCanceled(() -> stop()).named("Auto Index");
 ```
 
 ### Timeout followed by another step
@@ -208,7 +208,7 @@ indexer.run(co -> {
     co.wait(Seconds.of(0.1));
     indexer.setPower(1);
     co.park();
-}).whenCanceled(indexer::stop).named("Unjam");
+}).whenCanceled(() -> indexer.stop()).named("Unjam");
 ```
 
 ### withTimeout takes a unit
