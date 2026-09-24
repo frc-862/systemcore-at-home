@@ -15,6 +15,12 @@ import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.sim.TalonFXSimState;
 import com.ctre.phoenix6.sim.TalonFXSimState.MotorType;
 
+import org.wpilib.command2.Command;
+import org.wpilib.command2.InstantCommand;
+import org.wpilib.command2.StartEndCommand;
+import org.wpilib.command2.SubsystemBase;
+import org.wpilib.framework.RobotBase;
+import org.wpilib.framework.TimedRobot;
 import org.wpilib.math.system.DCMotor;
 import org.wpilib.math.system.Models;
 import static org.wpilib.units.Units.Amps;
@@ -29,28 +35,19 @@ import org.wpilib.units.measure.Current;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.Frequency;
 import org.wpilib.units.measure.MomentOfInertia;
-import org.wpilib.units.measure.MutAngularVelocity;
 import org.wpilib.units.measure.Time;
-import edu.wpi.first.util.datalog.BooleanLogEntry;
-import edu.wpi.first.util.datalog.DataLog;
-import edu.wpi.first.util.datalog.DoubleLogEntry;
-import org.wpilib.system.DataLogManager;
-import org.wpilib.system.RobotController;
 import org.wpilib.simulation.FlywheelSim;
-import org.wpilib.command2.Command;
-import org.wpilib.command2.InstantCommand;
-import org.wpilib.command2.StartEndCommand;
-import org.wpilib.command2.SubsystemBase;
-import frc.robot.Robot;
+import org.wpilib.system.RobotController;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
 import frc.robot.constants.RobotMap;
 import frc.util.hardware.ThunderBird;
-import frc.util.shuffleboard.LightningShuffleboard;
 import frc.util.units.ThunderMap;
 
 public class Shooter extends SubsystemBase {
 
     public class ShooterConstants {
-        public static final boolean INVERTED = RobotMap.IS_OASIS; // temp
+        public static final boolean INVERTED = false; // temp
         public static final Current STATOR_LIMIT = Amps.of(160.0); // temp
         public static final boolean BRAKE = false; // temp
         public static final double COAST_DC = 0.3; // Shooter power when coasting
@@ -58,8 +55,8 @@ public class Shooter extends SubsystemBase {
         public static final double kP = 0.5d;
         public static final double kI = 0d;
         public static final double kD = 0d;
-        public static final double kV = RobotMap.IS_OASIS ? 0.1185d : 0.1211d;
-        public static final double kS = RobotMap.IS_OASIS ? 0.37 : 0.31;
+        public static final double kV = 0.1211d;
+        public static final double kS = 0.31;
         public static final AngularVelocity TOLERANCE = RotationsPerSecond.of(2);
         public static final AngularVelocity BIAS_DELTA = RotationsPerSecond.of(1);
         public static final Frequency UPDATE_FREQUENCY = Hertz.of(1000);
@@ -68,17 +65,10 @@ public class Shooter extends SubsystemBase {
         public static final Distance FLYWHEEL_CIRCUMFERENCE = Inches.of(4).times(Math.PI);
 
         // for sim to account for movement between shooter, fuel, and hood
-        public static final double SHOOTER_EFFICIENCY = 0.53; 
+        public static final double SHOOTER_EFFICIENCY = 0.53;
         // Input is distance to target in meters, output is shooter speed in rotations per second
         public static final ThunderMap<Distance, AngularVelocity> VELOCITY_MAP = new ThunderMap<>() {
             {
-                // put(Inches.of(0), RotationsPerSecond.of(0));
-                // put(Inches.of(18.78*12), RotationsPerSecond.of(65));
-                // put(Inches.of(64), RotationsPerSecond.of(43));
-                // put(Inches.of(144), RotationsPerSecond.of(52));
-                // put(Inches.of(142), RotationsPerSecond.of(55));
-                // put(Inches.of(183), RotationsPerSecond.of(65));
-                // put(Feet.of(23), RotationsPerSecond.of(79));
                 put(Inches.of(248), RotationsPerSecond.of(64));
                 put(Inches.of(212), RotationsPerSecond.of(62));
                 put(Inches.of(161), RotationsPerSecond.of(54));
@@ -100,16 +90,13 @@ public class Shooter extends SubsystemBase {
 
     private AngularVelocity targetVelocity;
 
-    private MutAngularVelocity shooterBias;
+    // Mutable measures (MutAngularVelocity) no longer exist; measures are immutable
+    private AngularVelocity shooterBias;
 
     private TalonFXSimState motorSim;
     private FlywheelSim shooterSim;
 
-    private DoubleLogEntry targetVelocityLog;
-    private DoubleLogEntry biasLog;
-    private BooleanLogEntry onTargetLog;
-    private DoubleLogEntry leftVelocityLog;
-    private DoubleLogEntry rightVelocityLog;
+    private final TelemetryTable telemetry = Telemetry.getTable("Shooter");
 
     /** Creates a new Shooter Subsystem. */
     public Shooter() {
@@ -131,7 +118,7 @@ public class Shooter extends SubsystemBase {
         //instatiates duty cycle and velocity pid
         dutyCycle = new DutyCycleOut(0.0);
         velocityPID = new VelocityVoltage(0d);
-        shooterBias = RotationsPerSecond.mutable(0);
+        shooterBias = RotationsPerSecond.zero();
         targetVelocity = RotationsPerSecond.zero();
 
 
@@ -150,46 +137,24 @@ public class Shooter extends SubsystemBase {
         motorLeft.applyConfig(config);
         motorRight.setControl(new Follower(RobotMap.SHOOTER_LEFT, MotorAlignmentValue.Opposed));
 
-        if (Robot.isSimulation()){
+        if (RobotBase.isSimulation()){
             motorSim = motorLeft.getSimState();
             motorSim.setMotorType(MotorType.KrakenX60);
 
-            shooterSim = new FlywheelSim(Models.createFlywheelSystem(
+            shooterSim = new FlywheelSim(Models.flywheelFromPhysicalConstants(
                 DCMotor.getKrakenX60Foc(2), ShooterConstants.MOI.in(KilogramSquareMeters),
                 ShooterConstants.GEAR_RATIO), DCMotor.getKrakenX60Foc(2));
         }
 
-        initLogging();
-    }
-
-    private void initLogging() {
-        DataLog log = DataLogManager.getLog();
-
-        targetVelocityLog = new DoubleLogEntry(log, "/Shooter/TargetVelocity");
-        biasLog = new DoubleLogEntry(log, "/Shooter/Bias");
-        onTargetLog = new BooleanLogEntry(log, "/Shooter/OnTarget");
-        leftVelocityLog = new DoubleLogEntry(log, "/Shooter/VelocityLeft");
-        rightVelocityLog = new DoubleLogEntry(log, "/Shooter/VelocityRight");
     }
 
     @Override
     public void periodic() {
-        updateLogging();
-    }
-
-    private void updateLogging() {
-        targetVelocityLog.append(getTargetVelocity().in(RotationsPerSecond));
-        biasLog.append(getBias().in(RotationsPerSecond));
-        onTargetLog.append(isOnTarget());
-        leftVelocityLog.append(getLeftVelocity().in(RotationsPerSecond));
-        rightVelocityLog.append(getRightVelocity().in(RotationsPerSecond));
-
-        if (Robot.isNTEnabled()) {
-            LightningShuffleboard.setDouble("Shooter", "Left Velocity", getLeftVelocity().in(RotationsPerSecond));
-            LightningShuffleboard.setDouble("Shooter", "Right Velocity", getRightVelocity().in(RotationsPerSecond));
-            LightningShuffleboard.setDouble("Shooter", "Target Velocity", getTargetVelocity().in(RotationsPerSecond));
-            LightningShuffleboard.setDouble("Shooter", "Bias", getBias().in(RotationsPerSecond));
-        }
+        telemetry.log("TargetVelocity", getTargetVelocity());
+        telemetry.log("Bias", getBias());
+        telemetry.log("OnTarget", isOnTarget());
+        telemetry.log("VelocityLeft", getLeftVelocity());
+        telemetry.log("VelocityRight", getRightVelocity());
     }
 
     @Override
@@ -197,7 +162,7 @@ public class Shooter extends SubsystemBase {
         motorSim.setSupplyVoltage(RobotController.getBatteryVoltage());
 
         shooterSim.setInput(motorSim.getMotorVoltageMeasure().in(Volts));
-        shooterSim.update(Robot.kDefaultPeriod);
+        shooterSim.update(TimedRobot.DEFAULT_PERIOD);
 
         motorSim.setRotorVelocity(shooterSim.getAngularVelocity());
     }
@@ -233,14 +198,14 @@ public class Shooter extends SubsystemBase {
      * @param bias in rotations per second
      */
     public void changeBias(AngularVelocity bias) {
-        shooterBias.mut_plus(bias);
+        shooterBias = shooterBias.plus(bias);
         if (targetVelocity.gt(RotationsPerSecond.zero())) {
             applyChange();
         }
     }
 
     public void clearBias() {
-        shooterBias.mut_replace(RotationsPerSecond.zero());
+        shooterBias = RotationsPerSecond.zero();
     }
 
     public Command changeBiasCommand(AngularVelocity bias) {
@@ -252,12 +217,12 @@ public class Shooter extends SubsystemBase {
     }
 
     public void setBias(AngularVelocity bias) {
-        shooterBias.mut_replace(bias);
+        shooterBias = bias;
         if (targetVelocity.gt(RotationsPerSecond.zero())) {
             applyChange();
-        }        
+        }
     }
-    
+
     private void applyChange() {
         motorLeft.setControl(velocityPID.withVelocity(getTargetVelocityWithBias().in(RotationsPerSecond)));
     }
@@ -284,7 +249,7 @@ public class Shooter extends SubsystemBase {
     public AngularVelocity getTargetVelocity() {
         return targetVelocity;
     }
-    
+
     public AngularVelocity getTargetVelocityWithBias() {
         return targetVelocity.plus(shooterBias);
     }
