@@ -9,6 +9,12 @@ import com.ctre.phoenix6.sim.ChassisReference;
 import com.ctre.phoenix6.sim.TalonFXSimState;
 import com.ctre.phoenix6.sim.TalonFXSimState.MotorType;
 
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Mechanism;
+import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.RobotState;
+import org.wpilib.framework.RobotBase;
+import org.wpilib.framework.TimedRobot;
 import org.wpilib.math.system.DCMotor;
 import org.wpilib.math.system.Models;
 import static org.wpilib.units.Units.Amps;
@@ -25,42 +31,31 @@ import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.MomentOfInertia;
-import edu.wpi.first.util.datalog.BooleanLogEntry;
-import edu.wpi.first.util.datalog.DataLog;
-import edu.wpi.first.util.datalog.DoubleLogEntry;
-import org.wpilib.system.DataLogManager;
-import org.wpilib.driverstation.DriverStation;
-import org.wpilib.system.RobotController;
-import org.wpilib.system.Timer;
 import org.wpilib.simulation.DCMotorSim;
 import org.wpilib.simulation.SingleJointedArmSim;
 import org.wpilib.smartdashboard.Mechanism2d;
 import org.wpilib.smartdashboard.MechanismLigament2d;
 import org.wpilib.smartdashboard.MechanismRoot2d;
-import org.wpilib.command3.Command;
-import org.wpilib.command3.FunctionalCommand;
-import org.wpilib.command3.InstantCommand;
-import org.wpilib.command3.RunCommand;
-import org.wpilib.command3.SubsystemBase;
-import frc.robot.Robot;
+import org.wpilib.system.RobotController;
+import org.wpilib.system.Timer;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
 import frc.robot.constants.RobotMap;
 import frc.util.hardware.ThunderBird;
-import frc.util.shuffleboard.LightningShuffleboard;
 import frc.util.units.ThunderUnits;
-public class Collector extends SubsystemBase {
-    
+public class Collector implements Mechanism {
+
 
     public class CollectorConstants {
         // Collector Rollers
-        public static final boolean INVERTED = !RobotMap.IS_OASIS; // temp
+        public static final boolean INVERTED = true; // temp
         public static final Current STATOR_LIMIT = Amps.of(80); // temp
         public static final Current CURRENT_THRESHOLD = Amps.of(20); // temp
-        public static final 
-        boolean BRAKE = true; // temp
+        public static final boolean BRAKE = true; // temp
         public static final double COLLECT_POWER = 1d;
         public static final double COLLECT_MULT = 1d;
 
-        public static final MomentOfInertia COLLECTOR_MOI = KilogramSquareMeters.of(0.001); //temp 
+        public static final MomentOfInertia COLLECTOR_MOI = KilogramSquareMeters.of(0.001); //temp
         public static final double COLLECTOR_GEAR_RATIO = 1d; //temp
 
         // pivot motor config
@@ -72,9 +67,9 @@ public class Collector extends SubsystemBase {
 
 
         // pivot
-        public static final boolean PIVOT_INVERTED = !RobotMap.IS_OASIS;
+        public static final boolean PIVOT_INVERTED = true;
         public static final Current PIVOT_STATOR_LIMIT = Amps.of(100); // temp
-        public static final Current PIVOT_SUPPLY_LIMIT = RobotMap.IS_OASIS ? Amps.of(6) : Amps.of(20); // temp
+        public static final Current PIVOT_SUPPLY_LIMIT = Amps.of(20); // temp
         public static final boolean PIVOT_SUPPLY_LIMIT_ENABLE = true; // temp
         public static final boolean PIVOT_BRAKE_MODE = true; // temp
         public static final double PIVOT_ZERO_TIMER_THRESHOLD = 1;
@@ -82,11 +77,11 @@ public class Collector extends SubsystemBase {
         public static final boolean COLLECTOR_SUPPLY_LIMIT_ENABLE = true; // temp
         public static final double ROTOR_TO_ENCODER_RATIO = 1d; // temp
         public static final double ENCODER_TO_MECHANISM_RATIO = 9d * 24d/10d; // temp
-        public static final Angle MIN_ANGLE = RobotMap.IS_OASIS ? Rotations.of(-0.288818) : Rotations.of(0);
-        public static final Angle MAX_ANGLE = RobotMap.IS_OASIS ? Rotations.of(0.015869) : Rotations.of(0.35);
-        public static final Angle NEUTRAL_ANGLE = RobotMap.IS_OASIS ? Rotations.of(-0.25) : Rotations.of(0.25);
-        public static final Angle DEPLOY_ANGLE = RobotMap.IS_OASIS ? Rotations.of(0.013):  MAX_ANGLE;
-        public static final Angle STOW_ANGLE = RobotMap.IS_OASIS ? Rotations.of(-0.282) : MIN_ANGLE;
+        public static final Angle MIN_ANGLE = Rotations.of(0);
+        public static final Angle MAX_ANGLE = Rotations.of(0.35);
+        public static final Angle NEUTRAL_ANGLE = Rotations.of(0.25);
+        public static final Angle DEPLOY_ANGLE = MAX_ANGLE;
+        public static final Angle STOW_ANGLE = MIN_ANGLE;
         public static final Angle TOLERANCE = Rotations.of(0.05);
         public static final DutyCycleOut PIVOT_ZEROING_DC_STOW = new DutyCycleOut(-0.1);
         public static final DutyCycleOut PIVOT_ZEROING_DC_DEPLOY = new DutyCycleOut(0.1);
@@ -124,12 +119,11 @@ public class Collector extends SubsystemBase {
 
     private DCMotor gearbox;
 
-    private DoubleLogEntry pivotTargetAngleLog;
-    private BooleanLogEntry pivotOnTargetLog;
+    private final TelemetryTable telemetry = Telemetry.getTable("Collector");
 
 
     /**
-     * Creates a new Collector Subsystem.
+     * Creates a new Collector Mechanism.
      */
     public Collector() {
         collectorMotor = new ThunderBird(RobotMap.COLLECTOR, RobotMap.CAN_BUS,
@@ -145,7 +139,7 @@ public class Collector extends SubsystemBase {
         TalonFXConfiguration pivotConfig = pivotMotor.getConfig();
         TalonFXConfiguration collectorConfig = collectorMotor.getConfig();
         positionPID = new PositionVoltage(0);
-        
+
         pivotConfig.Slot0.kP = CollectorConstants.PIVOT_KP;
         pivotConfig.Slot0.kI = CollectorConstants.PIVOT_KI;
         pivotConfig.Slot0.kD = CollectorConstants.PIVOT_KD;
@@ -162,7 +156,7 @@ public class Collector extends SubsystemBase {
         collectorMotor.applyConfig(collectorConfig);
 
 
-        if(Robot.isSimulation()){
+        if(RobotBase.isSimulation()){
             // pivot sim stuff
             gearbox = DCMotor.getKrakenX60Foc(1);
 
@@ -175,10 +169,11 @@ public class Collector extends SubsystemBase {
             pivotMotorSim.setRawRotorPosition(CollectorConstants.STOW_ANGLE);
 
             // collector sim stuff
+            // LinearSystemId.createDCMotorSystem is gone; a gravity-free arm model is the same system
             collectorGearbox = DCMotor.getKrakenX60(1);
             collectorSim = new DCMotorSim(
-                Models.createDCMotorSystem(collectorGearbox, CollectorConstants.COLLECTOR_MOI.magnitude(), CollectorConstants.COLLECTOR_GEAR_RATIO),
-                collectorGearbox 
+                Models.singleJointedArmFromPhysicalConstants(collectorGearbox, CollectorConstants.COLLECTOR_MOI.magnitude(), CollectorConstants.COLLECTOR_GEAR_RATIO),
+                collectorGearbox
             );
 
             collectorMotorSim = collectorMotor.getSimState();
@@ -187,82 +182,54 @@ public class Collector extends SubsystemBase {
             mech2d = new Mechanism2d(3, 3);
             root2d = mech2d.getRoot("Collector", 0.5, 0.5);
             ligament = root2d.append(new MechanismLigament2d("Collector", 2, 90));
-            
-            LightningShuffleboard.send("Collector", "mech 2d", mech2d);
         }
 
-        initLogging();
+        Scheduler.getDefault().addPeriodic(this::periodic);
+        if (RobotBase.isSimulation()) {
+            Scheduler.getDefault().addPeriodic(this::simulationPeriodic);
+        }
     }
 
-    private void initLogging() {
-        DataLog log = DataLogManager.getLog();
-
-        pivotTargetAngleLog = new DoubleLogEntry(log, "/Collector/pivotTargetAngle");
-        pivotOnTargetLog = new BooleanLogEntry(log, "/Collector/pivotOnTarget");
-    }
-
-    @Override
-    public void periodic() {
-        // if (LightningShuffleboard.getBool("Collector", "Run Periodic", true)) {
-        //     if (requestZeroingStow.get()) {
-        //         pivotZeroed = false;
-        //         stowZero = true;
-        //     } else if (requestZeroingDeploy.get()) {
-        //         pivotZeroed = false;
-        //         stowZero = false;
-        //     }
-            if (!pivotZeroed && DriverStation.isEnabled()) {
-                if (!zeroingTimer.isRunning()) {
-                    zeroingTimer.restart();
-                    if (stowZero) {
-                        pivotMotor.setControl(CollectorConstants.PIVOT_ZEROING_DC_STOW);
-                    } else {
-                        pivotMotor.setControl(CollectorConstants.PIVOT_ZEROING_DC_DEPLOY);
-                    }
-                } else if (!pivotMotor.getVelocity().getValue().isNear(RotationsPerSecond.zero(), RotationsPerSecond.of(0.1))) {
-                    zeroingTimer.reset();
-                } else if (zeroingTimer.hasElapsed(CollectorConstants.PIVOT_ZERO_TIMER_THRESHOLD)) {
-                    pivotZeroed = true;
-                    if (stowZero) {
-                        // requestZeroingStow.set(false);
-                        pivotMotor.setPosition(CollectorConstants.STOW_ANGLE);
-                    } else {
-                        // requestZeroingDeploy.set(false);
-                        pivotMotor.setPosition(CollectorConstants.DEPLOY_ANGLE);
-                    }
-                    zeroingTimer.stop();
-                    setPivotAngle(targetPivotPosition);
+    private void periodic() {
+        if (!pivotZeroed && RobotState.isEnabled()) {
+            if (!zeroingTimer.isRunning()) {
+                zeroingTimer.restart();
+                if (stowZero) {
+                    pivotMotor.setControl(CollectorConstants.PIVOT_ZEROING_DC_STOW);
+                } else {
+                    pivotMotor.setControl(CollectorConstants.PIVOT_ZEROING_DC_DEPLOY);
                 }
+            } else if (!pivotMotor.getVelocity().getValue().isNear(RotationsPerSecond.zero(), RotationsPerSecond.of(0.1))) {
+                zeroingTimer.reset();
+            } else if (zeroingTimer.hasElapsed(CollectorConstants.PIVOT_ZERO_TIMER_THRESHOLD)) {
+                pivotZeroed = true;
+                if (stowZero) {
+                    pivotMotor.setPosition(CollectorConstants.STOW_ANGLE);
+                } else {
+                    pivotMotor.setPosition(CollectorConstants.DEPLOY_ANGLE);
+                }
+                zeroingTimer.stop();
+                setPivotAngle(targetPivotPosition);
             }
-            if (DriverStation.isDisabled()) {
-                pivotActive = false;
-            }
-        // }
-
-        updateLogging();
-    }
-
-    private void updateLogging() {
-        pivotTargetAngleLog.append(getTargetPivotAngle().in(Degrees));
-        pivotOnTargetLog.append(pivotOnTarget());
-
-        if (Robot.isNTEnabled()) {
-            LightningShuffleboard.setDouble("Collector", "Pivot Rotations", getPivotAngle().in(Rotations));
-            LightningShuffleboard.setDouble("Collector", "Pivot Target Rotations", getTargetPivotAngle().in(Rotations));
-            LightningShuffleboard.setBool("Collector", "Pivot On Target", pivotOnTarget());
-            LightningShuffleboard.setDouble("Collector", "Collector Velocity", getCollectorVelocity().in(RotationsPerSecond));
-            LightningShuffleboard.setBool("Collector", "Pivot Zeroed", pivotZeroed);
         }
+        if (RobotState.isDisabled()) {
+            pivotActive = false;
+        }
+
+        telemetry.log("Pivot Angle", getPivotAngle());
+        telemetry.log("Pivot Target Angle", getTargetPivotAngle());
+        telemetry.log("Pivot On Target", pivotOnTarget());
+        telemetry.log("Collector Velocity", getCollectorVelocity());
+        telemetry.log("Pivot Zeroed", pivotZeroed);
     }
 
 
-    @Override
-    public void simulationPeriodic() {
+    private void simulationPeriodic() {
         // collector sim stuff
         collectorMotorSim.setSupplyVoltage(RobotController.getBatteryVoltage());
 
         collectorSim.setInputVoltage(collectorMotorSim.getMotorVoltage());
-        collectorSim.update(Robot.kDefaultPeriod);
+        collectorSim.update(TimedRobot.DEFAULT_PERIOD);
 
         Angle collectorSimAngle = Radians.of(collectorSim.getAngularPositionRad());
         AngularVelocity collectorSimVelocity = RadiansPerSecond.of(collectorSim.getAngularVelocityRadPerSec());
@@ -274,14 +241,16 @@ public class Collector extends SubsystemBase {
         pivotMotorSim.setSupplyVoltage(RobotController.getBatteryVoltage());
 
         collectorPivotSim.setInputVoltage(pivotMotorSim.getMotorVoltage());
-        collectorPivotSim.update(Robot.kDefaultPeriod);
+        collectorPivotSim.update(TimedRobot.DEFAULT_PERIOD);
 
         Angle pivotSimAngle = Radians.of(collectorPivotSim.getAngleRads());
         AngularVelocity pivotSimVelocity = RadiansPerSecond.of(collectorPivotSim.getVelocityRadPerSec());
-        
+
         pivotMotorSim.setRawRotorPosition(pivotSimAngle.times(CollectorConstants.ENCODER_TO_MECHANISM_RATIO));
         pivotMotorSim.setRotorVelocity(pivotSimVelocity.times(CollectorConstants.ENCODER_TO_MECHANISM_RATIO));
         ligament.setAngle(90 - pivotSimAngle.in(Degrees));
+
+        telemetry.log("mech 2d", mech2d);
     }
 
     /**
@@ -374,39 +343,45 @@ public class Collector extends SubsystemBase {
     }
 
     public Command deployPivotCommand() {
-        return runOnce(() -> deployPivot());
+        return run(co -> deployPivot()).named("Collector Deploy");
     }
 
     public Command stowPivotCommand() {
-        return runOnce(() -> stowPivot());
+        return run(co -> stowPivot()).named("Collector Stow");
     }
 
-    // This command must not require the collector subsystem so it doesn't interrupt smart shoot
+    // This command must not require the collector mechanism so it doesn't interrupt smart shoot
     public Command driverStowPivotCommand() {
-        return new RunCommand(() -> stowPivot()).finallyDo( () -> deployPivot());
-    }    
+        return Command.noRequirements(co -> {
+            while (true) {
+                stowPivot();
+                co.yield();
+            }
+        }).whenCanceled(this::deployPivot).named("Collector Driver Stow");
+    }
 
     public Command neutralPivotCommand() {
-        return startEnd(() -> {
+        return run(co -> {
             if (pivotActive) {
                 neutralPivot();
             }
-        }, 
-        () -> {});
+            co.park();
+        }).named("Collector Neutral");
     }
 
+    /** Deploys the pivot then runs the rollers until canceled. */
     public Command collectCommand(DoubleSupplier power) {
-        return new FunctionalCommand(
-            () -> deployPivot(),
-            () -> setCollectorPower(power.getAsDouble()),
-            (interrupted) -> stopCollector(),
-            () -> false,
-            this
-        );
+        return run(co -> {
+            deployPivot();
+            while (true) {
+                setCollectorPower(power.getAsDouble());
+                co.yield();
+            }
+        }).whenCanceled(this::stopCollector).named("Collect");
     }
 
     public Command runCollectorWheels(DoubleSupplier power){
-        return new InstantCommand(() -> setCollectorPower(power.getAsDouble()));
+        return Command.noRequirements(co -> setCollectorPower(power.getAsDouble())).named("Collector Wheels");
     }
 }
 
