@@ -121,20 +121,6 @@ run(co -> {
 }).whenCanceled(this::stop).named("Index");
 ```
 
-### ⚠️ `finally` does not run when a command is canceled
-
-```java
-// 2027: WRONG. end() never runs when the trigger releases
-run(co -> {
-    try { start(); co.park(); } finally { end(); }
-});
-
-// 2027: RIGHT
-run(co -> { start(); co.park(); }).whenCanceled(this::end);
-```
-
-A canceled coroutine is simply never resumed. See `CoroutineCancelTest`.
-
 ### finallyDo
 
 ```java
