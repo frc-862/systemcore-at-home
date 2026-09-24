@@ -25,7 +25,6 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.linalg.Vector;
 import org.wpilib.math.numbers.N2;
-import org.wpilib.math.util.MathUtil;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Seconds;
@@ -48,7 +47,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Mechanism {
     private double m_lastSimTime;
 
     /* Blue alliance sees forward as 0 degrees (toward red alliance wall) */
-    private static final Rotation2d kBlueAlliancePerspectiveRotation = Rotation2d.kZero;
+    private static final Rotation2d kBlueAlliancePerspectiveRotation = Rotation2d.ZERO;
     /* Red alliance sees forward as 180 degrees (toward blue alliance wall) */
     private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.k180deg;
     /* Keep track if we've ever applied the operator perspective before or not */
@@ -97,7 +96,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Mechanism {
          */
         if (!m_hasAppliedOperatorPerspective || RobotState.isDisabled()) {
             MatchState.getAlliance().ifPresent(allianceColor -> {
-                setOperatorPerspectiveForward(
+                setOperatorForwardDirection(
                     allianceColor == Alliance.RED
                         ? kRedAlliancePerspectiveRotation
                         : kBlueAlliancePerspectiveRotation
@@ -254,8 +253,8 @@ public class Swerve extends TunerSwerveDrivetrain implements Mechanism {
         pidY.setTolerance(DriveConstants.DRIVE_TOLERANCE.in(Meters));
         pidR.setTolerance(DriveConstants.ROT_TOLERANCE.in(Degrees));
 
-        return autoDrive(() -> MathUtil.clamp(pidX.calculate(getPose().getX(), targetPose.getX()), -1, 1),
-        () -> MathUtil.clamp(pidY.calculate(getPose().getY(), targetPose.getY()), -1, 1),
+        return autoDrive(() -> Math.clamp(pidX.calculate(getPose().getX(), targetPose.getX()), -1, 1),
+        () -> Math.clamp(pidY.calculate(getPose().getY(), targetPose.getY()), -1, 1),
         () -> pidR.calculate(getPose().getRotation().getDegrees(), targetPose.getRotation().getDegrees()));
     }
 

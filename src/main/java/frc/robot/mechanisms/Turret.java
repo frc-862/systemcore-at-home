@@ -19,6 +19,7 @@ import org.wpilib.framework.TimedRobot;
 import org.wpilib.hardware.discrete.DigitalInput;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
+import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
@@ -206,15 +207,15 @@ public class Turret implements Mechanism {
 
     private void simulationPeriodic() {
         double batteryVoltage = RobotController.getBatteryVoltage();
-        double frictionVoltage = TurretConstants.SIM_FRICTION * turretSim.getVelocityRadPerSec();
+        double frictionVoltage = TurretConstants.SIM_FRICTION * turretSim.getVelocity();
         motorSim.setSupplyVoltage(batteryVoltage);
 
         double motorVoltage = motorSim.getMotorVoltage();
         turretSim.setInputVoltage(motorVoltage - frictionVoltage);
         turretSim.update(TimedRobot.DEFAULT_PERIOD);
 
-        Angle simAngle = Radians.of(turretSim.getAngleRads());
-        AngularVelocity simVeloc = RadiansPerSecond.of(turretSim.getVelocityRadPerSec());
+        Angle simAngle = Radians.of(turretSim.getAngle());
+        AngularVelocity simVeloc = RadiansPerSecond.of(turretSim.getVelocity());
         motorSim.setRawRotorPosition(simAngle.times(TurretConstants.ENCODER_TO_MECHANISM_RATIO));
         motorSim.setRotorVelocity(simVeloc.times(TurretConstants.ENCODER_TO_MECHANISM_RATIO));
 
@@ -388,7 +389,7 @@ public class Turret implements Mechanism {
     public void turretAim(Pose2d turretPose, Target target, AngularVelocity chassisOmegaRadPerSec, AngularVelocity hubRadPerSec) {
         Translation2d delta = FieldConstants.getTargetData(target).minus(turretPose.getTranslation());
 
-        Angle fieldAngle = delta.getAngle().getMeasure();
+        Angle fieldAngle = delta.getAngle().orElse(Rotation2d.ZERO).getMeasure();
 
         Angle turretAngle = fieldAngle.minus(turretPose.getRotation().getMeasure());
 

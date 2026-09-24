@@ -231,8 +231,8 @@ public class Collector implements Mechanism {
         collectorSim.setInputVoltage(collectorMotorSim.getMotorVoltage());
         collectorSim.update(TimedRobot.DEFAULT_PERIOD);
 
-        Angle collectorSimAngle = Radians.of(collectorSim.getAngularPositionRad());
-        AngularVelocity collectorSimVelocity = RadiansPerSecond.of(collectorSim.getAngularVelocityRadPerSec());
+        Angle collectorSimAngle = Radians.of(collectorSim.getAngularPosition());
+        AngularVelocity collectorSimVelocity = RadiansPerSecond.of(collectorSim.getAngularVelocity());
 
         collectorMotorSim.setRawRotorPosition(collectorSimAngle.times(CollectorConstants.COLLECTOR_GEAR_RATIO));
         collectorMotorSim.setRotorVelocity(collectorSimVelocity.times(CollectorConstants.COLLECTOR_GEAR_RATIO));
@@ -243,8 +243,8 @@ public class Collector implements Mechanism {
         collectorPivotSim.setInputVoltage(pivotMotorSim.getMotorVoltage());
         collectorPivotSim.update(TimedRobot.DEFAULT_PERIOD);
 
-        Angle pivotSimAngle = Radians.of(collectorPivotSim.getAngleRads());
-        AngularVelocity pivotSimVelocity = RadiansPerSecond.of(collectorPivotSim.getVelocityRadPerSec());
+        Angle pivotSimAngle = Radians.of(collectorPivotSim.getAngle());
+        AngularVelocity pivotSimVelocity = RadiansPerSecond.of(collectorPivotSim.getVelocity());
 
         pivotMotorSim.setRawRotorPosition(pivotSimAngle.times(CollectorConstants.ENCODER_TO_MECHANISM_RATIO));
         pivotMotorSim.setRotorVelocity(pivotSimVelocity.times(CollectorConstants.ENCODER_TO_MECHANISM_RATIO));

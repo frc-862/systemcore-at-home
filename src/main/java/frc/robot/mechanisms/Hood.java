@@ -237,7 +237,7 @@ public class Hood implements Mechanism {
         hoodSim.setInputVoltage(motorSim.getMotorVoltage());
         hoodSim.update(TimedRobot.DEFAULT_PERIOD);
 
-        Angle simAngle = Radians.of(hoodSim.getAngleRads());
+        Angle simAngle = Radians.of(hoodSim.getAngle());
 
         motorSim.setRawRotorPosition(simAngle.times(HoodConstants.ROTOR_TO_MECHANISM_RATIO));
 

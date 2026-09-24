@@ -163,7 +163,7 @@ public class Cannon {
     }
 
     public Angle getTargetAngle(Pose2d pose) {
-        return Radians.of(getTargetTranslation().minus(getShooterTranslation(pose)).getAngle().getRadians());
+        return Radians.of(getTargetTranslation().minus(getShooterTranslation(pose)).getAngle().orElse(Rotation2d.ZERO).getRadians());
     }
 
     public Angle getTargetAngle() {
@@ -416,6 +416,6 @@ public class Cannon {
             0
         );
 
-        return pose.exp(twist);
+        return pose.plus(twist.exp());
     }
 }

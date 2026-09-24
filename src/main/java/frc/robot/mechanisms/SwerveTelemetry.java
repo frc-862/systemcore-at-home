@@ -40,13 +40,13 @@ public class SwerveTelemetry {
     /* A direction changing and length constant ligament for module direction */
     private final MechanismLigament2d[] m_moduleDirections = new MechanismLigament2d[] {
         m_moduleMechanisms[0].getRoot("RootDirection", 0.5, 0.5)
-            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.kWhite))),
+            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.WHITE))),
         m_moduleMechanisms[1].getRoot("RootDirection", 0.5, 0.5)
-            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.kWhite))),
+            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.WHITE))),
         m_moduleMechanisms[2].getRoot("RootDirection", 0.5, 0.5)
-            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.kWhite))),
+            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.WHITE))),
         m_moduleMechanisms[3].getRoot("RootDirection", 0.5, 0.5)
-            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.kWhite))),
+            .append(new MechanismLigament2d("Direction", 0.1, 0, 0, new Color8Bit(Color.WHITE))),
     };
 
     /**
