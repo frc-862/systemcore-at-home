@@ -4,6 +4,9 @@
 
 package frc.robot.mechanisms;
 
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
@@ -23,31 +26,25 @@ import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.Time;
-import edu.wpi.first.util.datalog.DataLog;
-import edu.wpi.first.util.datalog.DoubleArrayLogEntry;
-import edu.wpi.first.util.datalog.DoubleLogEntry;
-import edu.wpi.first.util.datalog.StructLogEntry;
-import org.wpilib.system.DataLogManager;
-import org.wpilib.driverstation.DriverStation;
-import org.wpilib.command3.Command;
-import org.wpilib.command3.ParallelCommandGroup;
-import org.wpilib.command3.RunCommand;
-import org.wpilib.command3.SequentialCommandGroup;
-import org.wpilib.command3.SubsystemBase;
-import org.wpilib.command3.WaitUntilCommand;
-import frc.robot.Robot;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
+import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.Tunables;
 import frc.robot.constants.FieldConstants;
 import frc.robot.constants.FieldConstants.Target;
 import frc.robot.mechanisms.Indexer.IndexerConstants;
 import frc.robot.mechanisms.Shooter.ShooterConstants;
 import frc.util.AllianceHelpers;
-import frc.util.shuffleboard.LightningShuffleboard;
 import frc.util.units.ThunderMap;
 
-public class Cannon extends SubsystemBase {
+/**
+ * Coordinates the shooter, turret, hood and indexer. It owns no hardware, so in v3 it is a plain
+ * class rather than a Mechanism: its commands require the mechanisms they actually drive.
+ */
+public class Cannon {
     // ======== CANNON CONSTANTS ========
 
-    public class CannonConstants { 
+    public class CannonConstants {
         public static final Distance SMART_SHOOT_MIN_DISTANCE = Inches.of(64);
         public static final Translation2d SHOOTER_TRANSLATION = new Translation2d(Inches.of(5.75), Inches.of(-5.75));
         public static final Transform2d SHOOTER_TRANSFORM = new Transform2d(SHOOTER_TRANSLATION, new Rotation2d());
@@ -65,7 +62,7 @@ public class Cannon extends SubsystemBase {
 
         public static final int MAX_OTF_ITERATIONS = 10;
         public static final Distance OTF_TOLERANCE = Inches.of(1.5);
-      
+
         public static final CandShot LEFT_SHOT = new CandShot(Degrees.of(0), Degrees.of(63), RotationsPerSecond.of(55)); //Temp
         public static final CandShot RIGHT_SHOT = new CandShot(Degrees.of(0), Degrees.of(63), RotationsPerSecond.of(55)); //Temp
         public static final CandShot MIDDLE_SHOT = new CandShot(Degrees.of(0), Degrees.of(80), RotationsPerSecond.of(53)); //Temp
@@ -73,8 +70,8 @@ public class Cannon extends SubsystemBase {
         public static final Distance SHOOT_DISTANCE_BIAS = Inches.of(6);
     }
 
-    
-    // Subsystems
+
+    // Mechanisms
     private Shooter shooter;
     private Turret turret;
     private Hood hood;
@@ -84,17 +81,18 @@ public class Cannon extends SubsystemBase {
     // Target storage
     private Target storedTarget;
 
-    private DoubleArrayLogEntry targetPositionLog;
-    private DoubleLogEntry distToTargetLog;
-    private StructLogEntry<Pose2d> futurePoseLog;
+    private final TelemetryTable telemetry = Telemetry.getTable("Cannon");
+
+    // Replaces LightningShuffleboard.getDouble(): a value editable from the dashboard
+    private final TunableDouble shooterDistanceBiasInches = Tunables.addDouble("Cannon/Shooter Distance Bias", 8);
 
     /**
      * Creates a new cannon
      * @param shooter shooter
      * @param turret turret
-     * @param hood hood 
-     * @param indexer indexer
+     * @param hood hood
      * @param drivetrain serve
+     * @param indexer indexer
      */
     public Cannon(Shooter shooter, Turret turret, Hood hood, Swerve drivetrain, Indexer indexer) {
         this.shooter = shooter;
@@ -106,22 +104,13 @@ public class Cannon extends SubsystemBase {
 
         this.storedTarget = FieldConstants.GOAL_POSITION;
 
-        initLogging();
+        Scheduler.getDefault().addPeriodic(this::periodic);
     }
 
-    private void initLogging() {
-        DataLog log = DataLogManager.getLog();
-
-        targetPositionLog = new DoubleArrayLogEntry(log, "/Cannon/TargetPosition");
-        distToTargetLog = new DoubleLogEntry(log, "/Cannon/DistanceToTarget");
-        futurePoseLog = StructLogEntry.create(log, "/Cannon/FuturePose", Pose2d.struct);
-    }
-
-    @Override
-    public void periodic() {
+    private void periodic() {
         // Code to calculate target position
         Pose2d robotPose = drivetrain.getPose();
-        
+
         boolean isTop = robotPose.getY() > FieldConstants.FIELD_MIDDLE_Y;
 
         if (drivetrain.isInZone()) {
@@ -132,24 +121,13 @@ public class Cannon extends SubsystemBase {
             storedTarget =  new Target(FieldConstants.ZONE_POSITION_BLUE_BOTTOM, FieldConstants.ZONE_POSITION_RED_BOTTOM);
         }
 
-        updateLogging();
+        telemetry.log("Target Position", getTargetTranslation());
+        telemetry.log("Distance To Target", getTargetDistance());
+        telemetry.log("Turret Position", new Pose2d(getShooterTranslation(), new Rotation2d()));
+        telemetry.log("In No Passing Zone", isInNoPassingZone());
     }
 
-    private void updateLogging() {
-        targetPositionLog.append(new double[]{getTargetTranslation().getX(), getTargetTranslation().getY()});
-        distToTargetLog.append(getTargetDistance().in(Meters));
 
-        if (Robot.isNTEnabled()) {
-            LightningShuffleboard.setTranslation2d("Cannon", "Target Position", FieldConstants.getTargetData(getTarget()));
-            // LightningShuffleboard.setTranslation2d("Cannon", "Target Position", getTarget());
-            LightningShuffleboard.setPose2d("Cannon", "Target Pose", new Pose2d(getTargetTranslation(), new Rotation2d()));
-            LightningShuffleboard.setDouble("Cannon", "Distance To Target", getTargetDistance().in(Meters));
-            LightningShuffleboard.setPose2d("Cannon", "Turret Position", new Pose2d(getShooterTranslation(), new Rotation2d()));
-            LightningShuffleboard.setBool("Cannon", "In No Passing Zone", isInNoPassingZone());
-        }
-    }
-
-        
 
     /**
      * Gets the translation of the shooter relative to the field
@@ -216,44 +194,46 @@ public class Cannon extends SubsystemBase {
      * @return The command
      */
     public Command createCannonCommand(Angle hoodAngle, AngularVelocity shooterVelocity) {
-        return new ParallelCommandGroup(
-            shooter.shootCommand(shooterVelocity), 
+        // Composition builders need a name before they become a Command
+        return Command.parallel(
+            shooter.shootCommand(shooterVelocity),
             hood.setPositionCommand(hoodAngle)
-        );     
+        ).named("Cannon Set");
     }
 
     /**
      * Returns a command to set the hood and shooter values
      * @param turretAngle the angle to set the turret to
      * @param hoodAngle the angle to set the hood to
-     * @param shooterVelocity the velocity to set the shooter to 
+     * @param shooterVelocity the velocity to set the shooter to
      * @return The command
      */
     public Command createCannonCommand(Angle turretAngle, Angle hoodAngle, AngularVelocity shooterVelocity) {
-        return new ParallelCommandGroup(
-            shooter.shootCommand(shooterVelocity), 
-            turret.setAngleCommand(turretAngle), 
+        return Command.parallel(
+            shooter.shootCommand(shooterVelocity),
+            turret.setAngleCommand(turretAngle),
             hood.setPositionCommand(hoodAngle)
-        );
+        ).named("Cannon Set With Turret");
     }
 
     /**
-     * Creates a cand shot command that uses only hood and shooter
+     * Creates a cand shot command that uses only hood and shooter.
+     * Holds the shooter and hood at the canned values and feeds once on target.
      * @param value The cand shot value
      * @return The command
      */
     public Command createCandShotCommand(CannonConstants.CandShot value) {
-        return new ParallelCommandGroup(
-            createCannonCommand(value.hoodAngle, value.shooterVelocity).andThen(hood.idle(), shooter.idle()),
-            
-            indexWhenOnTarget()
-        ).handleInterrupt(() -> {
+        return Command.requiring(shooter, hood).executing(co -> {
+            shooter.setVelocity(value.shooterVelocity());
+            hood.setPosition(value.hoodAngle());
+            // The indexer command runs as a child; it can't outlive this command
+            co.await(indexWhenOnTarget());
+        }).whenCanceled(() -> {
             shooter.stop();
             turret.stop();
             hood.stop();
             indexer.stop();
-        });
-        
+        }).named("Cand Shot");
     }
 
     /**
@@ -262,10 +242,12 @@ public class Cannon extends SubsystemBase {
      * @return The command
      */
     public Command createTurretCandShotCommand(CannonConstants.CandShot value) {
-      return new ParallelCommandGroup(
-            createCannonCommand(value.turretAngle, value.hoodAngle, value.shooterVelocity).andThen(hood.idle(), shooter.idle()),
-            indexWhenOnTarget()
-        );
+        return Command.requiring(shooter, hood, turret).executing(co -> {
+            shooter.setVelocity(value.shooterVelocity());
+            hood.setPosition(value.hoodAngle());
+            turret.setAngle(value.turretAngle());
+            co.await(indexWhenOnTarget());
+        }).named("Turret Cand Shot");
     }
 
     /**
@@ -298,15 +280,15 @@ public class Cannon extends SubsystemBase {
      * @return The command to run
      */
     public Command smartShoot() {
-        return shooter.runShootCommand(() -> Shooter.ShooterConstants.VELOCITY_MAP.get(getTargetDistance()))
-        .alongWith(new SequentialCommandGroup(
-            new WaitUntilCommand(() -> turret.isOnTarget() && hood.isOnTarget() && shooter.isOnTarget() && !isNearHub()),
-            indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER)
-        )
-        .finallyDo((end) -> {
+        return Command.noRequirements(co -> {
+            // fork starts the shooter command alongside this one without waiting for it
+            co.fork(shooter.runShootCommand(() -> ShooterConstants.VELOCITY_MAP.get(getTargetDistance())));
+            co.waitUntil(() -> turret.isOnTarget() && hood.isOnTarget() && shooter.isOnTarget() && !isNearHub());
+            co.await(indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER));
+        }).whenCanceled(() -> {
             shooter.setPower(ShooterConstants.COAST_DC);
             indexer.stop();
-        }));
+        }).named("Smart Shoot");
     }
 
     /**
@@ -314,51 +296,47 @@ public class Cannon extends SubsystemBase {
      * @return DA OTFFF
      */
     public Command shootOTF() {
-        return new RunCommand(() -> { // hi david (from Bea)
-            Time tof;
+        return Command.requiring(turret, shooter, hood).executing(co -> {
+            while (true) { // hi david (from Bea)
+                Time tof;
 
-            Pose2d previousPose;
-            Pose2d futurePose = drivetrain.getPose();  
+                Pose2d previousPose;
+                Pose2d futurePose = drivetrain.getPose();
 
-            Distance futureDist = getTargetDistance(); 
+                Distance futureDist = getTargetDistance();
 
-            for (int i = 0; i < CannonConstants.MAX_OTF_ITERATIONS; i++) {
-                tof = CannonConstants.TIME_OF_FLIGHT_MAP.get(futureDist);
+                for (int i = 0; i < CannonConstants.MAX_OTF_ITERATIONS; i++) {
+                    tof = CannonConstants.TIME_OF_FLIGHT_MAP.get(futureDist);
 
-                previousPose = futurePose;
-                futurePose = getFuturePoseFromTime(tof);
+                    previousPose = futurePose;
+                    futurePose = getFuturePoseFromTime(tof);
 
-                futureDist = getTargetDistance(futurePose);
+                    futureDist = getTargetDistance(futurePose);
 
-                if (Math.abs(futurePose.minus(previousPose).getTranslation().getNorm()) < CannonConstants.OTF_TOLERANCE.in(Meters)) {
-                    break;
+                    if (Math.abs(futurePose.minus(previousPose).getTranslation().getNorm()) < CannonConstants.OTF_TOLERANCE.in(Meters)) {
+                        break;
+                    }
                 }
+
+                Distance mapDist = futureDist;
+
+                if (RobotState.isTeleop()) {
+                    mapDist = futureDist.minus(Inches.of(shooterDistanceBiasInches.get()));
+                }
+
+                Angle hoodAngle = Hood.HoodConstants.HOOD_MAP.get(mapDist);
+                AngularVelocity shooterVelocity = Shooter.ShooterConstants.VELOCITY_MAP.get(mapDist);
+
+                hood.setPosition(hoodAngle);
+                shooter.setVelocity(shooterVelocity);
+
+                telemetry.log("Future Pose", futurePose);
+
+                turret.turretAim(new Pose2d(getShooterTranslation(futurePose), futurePose.getRotation()), getTarget(), getRobotAngularVelocity(), getHubAngularVelocity(futurePose));
+
+                co.yield();
             }
-
-            Distance mapDist = futureDist;
-
-            if (DriverStation.isTeleop()) {
-                mapDist = futureDist.minus(Inches.of(LightningShuffleboard.getDouble("Cannon", "Shooter Distance Bias", 8)));
-            }
-           
-            Angle hoodAngle = Hood.HoodConstants.HOOD_MAP.get(mapDist);
-            AngularVelocity shooterVelocity = Shooter.ShooterConstants.VELOCITY_MAP.get(mapDist);
-
-            hood.setPosition(hoodAngle);
-            shooter.setVelocity(shooterVelocity);
-
-            if (!DriverStation.isFMSAttached()) {
-                LightningShuffleboard.setPose2d("Cannon", "Future Pose", futurePose);
-            }
-
-            futurePoseLog.append(futurePose);
-
-            turret.turretAim(new Pose2d(getShooterTranslation(futurePose), futurePose.getRotation()), getTarget(), getRobotAngularVelocity(), getHubAngularVelocity(futurePose));
-      }, turret, shooter, hood);
-    
-    //   .alongWith(drivetrain.increaseRampRates())
-    //   .alongWith(drivetrain.lowerSupplyLimits());    
-      
+        }).named("Shoot OTF");
     }
 
     /**
@@ -369,16 +347,16 @@ public class Cannon extends SubsystemBase {
           Distance distance = Meters.of(this.getShooterTranslation().getDistance(FieldConstants.getTargetData(FieldConstants.GOAL_POSITION)));
           return distance.lt(CannonConstants.SMART_SHOOT_MIN_DISTANCE);
     }
-    
+
     /**
      * starts the indexer when the hood, turret, and shooter is on target.
      * @return The command
      */
     public Command indexWhenOnTarget(){
-        return new SequentialCommandGroup(
-            new WaitUntilCommand(() -> isOnTarget()),
-            indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, Indexer.IndexerConstants.TRANSFER_POWER)
-        );
+        return Command.noRequirements(co -> {
+            co.waitUntil(this::isOnTarget);
+            co.await(indexer.autoIndex(IndexerConstants.SPINDEXDER_POWER, IndexerConstants.TRANSFER_POWER));
+        }).named("Index When On Target");
     }
 
     /**
@@ -386,7 +364,7 @@ public class Cannon extends SubsystemBase {
      * @return if the cannon is in the no passing zone
      */
     public boolean isInNoPassingZone() {
-        return AllianceHelpers.isBlueAlliance() ? FieldConstants.RED_NO_PASSING_ZONE.contains(getShooterTranslation()) 
+        return AllianceHelpers.isBlueAlliance() ? FieldConstants.RED_NO_PASSING_ZONE.contains(getShooterTranslation())
             : FieldConstants.BLUE_NO_PASSING_ZONE.contains(getShooterTranslation());
     }
 
@@ -404,35 +382,17 @@ public class Cannon extends SubsystemBase {
      * @param pose the pose to use for the calculation
      */
     public AngularVelocity getHubAngularVelocity(Pose2d pose) {
-        // double velocityMagnitude = Math.sqrt(Math.pow(drivetrain.getCurrentRobotChassisVelocities().vxMetersPerSecond, 2) + Math.pow(drivetrain.getCurrentRobotChassisVelocities().vyMetersPerSecond, 2));
-        // double velocityAngle = Math.atan2(drivetrain.getCurrentRobotChassisVelocities().vyMetersPerSecond, drivetrain.getCurrentRobotChassisVelocities().vxMetersPerSecond);
-
-        // double[] velocityVector = {velocityMagnitude, velocityAngle};
-
-        // double robotHubMagnitude = getShooterTranslation().getDistance(FieldConstants.getTargetData(FieldConstants.GOAL_POSITION));
-        // double robotHubAngle = Math.atan2(FieldConstants.getTargetData(FieldConstants.GOAL_POSITION).getY() - getShooterTranslation().getY(), FieldConstants.getTargetData(FieldConstants.GOAL_POSITION).getX() - getShooterTranslation().getX());
-
-        // double[] robotHubVector = {robotHubMagnitude, robotHubAngle};
-
-        // double[] robotHubOrthogonalVector = {1, robotHubAngle + Math.PI / 2};
-
-        // double orthagVectorScalar = velocityMagnitude * Math.sin(velocityAngle - robotHubAngle);
-
-        // double circumference = 2 * Math.PI * robotHubMagnitude;
-
-        // double angularVelocity = orthagVectorScalar / circumference;
-        // return angularVelocity;
-
         double robotTargetAngle = getTargetAngle(pose).in(Radians);
-        
-        Translation2d fieldRelativeVelocity = new Translation2d(drivetrain.getWallCorrectedChassisVelocities().vxMetersPerSecond, drivetrain.getWallCorrectedChassisVelocities().vyMetersPerSecond).rotateBy(drivetrain.getPose().getRotation());
+
+        ChassisVelocities velocities = drivetrain.getWallCorrectedChassisVelocities();
+        Translation2d fieldRelativeVelocity = new Translation2d(velocities.vx, velocities.vy).rotateBy(drivetrain.getPose().getRotation());
 
         double hubRotation = (-fieldRelativeVelocity.getX() * Math.sin(robotTargetAngle) + fieldRelativeVelocity.getY() * Math.cos(robotTargetAngle)) / getTargetDistance(pose).in(Meters);
         return RadiansPerSecond.of(hubRotation);
     }
 
     public AngularVelocity getRobotAngularVelocity() {
-        return RadiansPerSecond.of(drivetrain.getWallCorrectedChassisVelocities().omegaRadiansPerSecond);
+        return RadiansPerSecond.of(drivetrain.getWallCorrectedChassisVelocities().omega);
     }
 
     public Pose2d getFuturePoseFromTime(Time time) {
@@ -440,12 +400,12 @@ public class Cannon extends SubsystemBase {
         double dt = time.in(Seconds);
 
         double driveMultiplier = 1;
-    
+
         Pose2d pose = drivetrain.getPose();
 
-        double filteredOmegaRadPerSec = speeds.omegaRadiansPerSecond;
-        double filteredXVel = speeds.vxMetersPerSecond - 0.22;
-        double filteredYVel = speeds.vyMetersPerSecond;
+        double filteredOmegaRadPerSec = speeds.omega;
+        double filteredXVel = speeds.vx - 0.22;
+        double filteredYVel = speeds.vy;
 
         double rrXVel = (-filteredOmegaRadPerSec * Cannon.CannonConstants.SHOOTER_TRANSLATION.getY());
         double rrYVel = (filteredOmegaRadPerSec * Cannon.CannonConstants.SHOOTER_TRANSLATION.getX());
