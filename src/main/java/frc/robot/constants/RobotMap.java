@@ -1,14 +1,12 @@
 package frc.robot.constants;
 
-import java.nio.file.Paths;
+import org.wpilib.hardware.bus.CANPort;
 
 import com.ctre.phoenix6.CANBus;
 
 public class RobotMap {
-    public static final String OASIS_IDENTIFIER = "/home/lvuser/Oasis"; // Differentiate between Oasis and Mirage
-    public static final boolean IS_OASIS = Paths.get(OASIS_IDENTIFIER).toFile().exists();
-
-    public static final CANBus CAN_BUS = new CANBus("Canivore");
+    // SystemCore has built-in CAN ports instead of a CANivore. Oasis support was dropped in the port.
+    public static final CANBus CAN_BUS = new CANBus(CANPort.CAN_S0);
 
     public static final int COLLECTOR = 9;
     public static final int COLLECTOR_PIVOT = 10;
@@ -31,7 +29,6 @@ public class RobotMap {
     public static final int DRIVER_PORT = 0;
     public static final int COPILOT_PORT = 1;
 
-    public static final int PDH = 21;
     public static final int CLIMBER_FORWARD_LIMIT_SWITCH = 2;
     public static final int CLIMBER_REVERSE_LIMIT_SWITCH = 3;
 }
