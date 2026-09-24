@@ -11,6 +11,14 @@ import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.sim.TalonFXSimState;
 import com.ctre.phoenix6.sim.TalonFXSimState.MotorType;
 
+import org.wpilib.command2.Command;
+import org.wpilib.command2.InstantCommand;
+import org.wpilib.command2.RunCommand;
+import org.wpilib.command2.StartEndCommand;
+import org.wpilib.command2.WaitCommand;
+import org.wpilib.command2.SubsystemBase;
+import org.wpilib.framework.RobotBase;
+import org.wpilib.framework.TimedRobot;
 import org.wpilib.math.numbers.N1;
 import org.wpilib.math.system.Models;
 import static org.wpilib.units.Units.Amps;
@@ -20,21 +28,12 @@ import static org.wpilib.units.Units.Volts;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
 import org.wpilib.units.measure.Time;
-import edu.wpi.first.util.datalog.DataLog;
-import edu.wpi.first.util.datalog.DoubleLogEntry;
-import org.wpilib.system.DataLogManager;
-import org.wpilib.system.RobotController;
 import org.wpilib.simulation.LinearSystemSim;
-import org.wpilib.command2.Command;
-import org.wpilib.command2.InstantCommand;
-import org.wpilib.command2.RunCommand;
-import org.wpilib.command2.StartEndCommand;
-import org.wpilib.command2.SubsystemBase;
-import org.wpilib.command2.WaitCommand;
-import frc.robot.Robot;
+import org.wpilib.system.RobotController;
+import org.wpilib.telemetry.Telemetry;
+import org.wpilib.telemetry.TelemetryTable;
 import frc.robot.constants.RobotMap;
 import frc.util.hardware.ThunderBird;
-import frc.util.shuffleboard.LightningShuffleboard;
 
 public class Indexer extends SubsystemBase {
 
@@ -59,7 +58,7 @@ public class Indexer extends SubsystemBase {
         public static final boolean TRANSFER_MOTOR_BRAKE_MODE = true; // temp
 
         public static final double TRANSFER_POWER = 0.8;
-        public static final Current TRANSFER_SUPPLY_LIMIT = Amps.of(40); // temp 
+        public static final Current TRANSFER_SUPPLY_LIMIT = Amps.of(40); // temp
         public static final boolean TRANSFER_SUPPLY_LIMIT_ENABLE = true; // temp
 
         // sim
@@ -75,8 +74,7 @@ public class Indexer extends SubsystemBase {
     private LinearSystemSim<N1, N1, N1> spindexerSim;
     private TalonFXSimState motorSim;
 
-    private DoubleLogEntry transferLog;
-    private DoubleLogEntry spindexerLog; 
+    private final TelemetryTable telemetry = Telemetry.getTable("Indexer");
 
     /** Creates a new Spindexer Subsystem. */
     public Indexer() {
@@ -100,31 +98,19 @@ public class Indexer extends SubsystemBase {
         spindexerMotor.applyConfig(spindexerConfig);
         transferMotor.applyConfig(transferConfig);
 
-        if (Robot.isSimulation()) {
-            spindexerSim = new LinearSystemSim<N1, N1, N1>(Models.identifyVelocitySystem(IndexerConstants.SPINDEXER_SIM_kV,
+        if (RobotBase.isSimulation()) {
+            spindexerSim = new LinearSystemSim<N1, N1, N1>(Models.flywheelFromSysId(IndexerConstants.SPINDEXER_SIM_kV,
                 IndexerConstants.SPINDEXER_SIM_kA));
             motorSim = spindexerMotor.getSimState();
             motorSim.setMotorType(MotorType.KrakenX44);
         }
 
-        initLogging();
     }
 
-    private void initLogging() {
-        DataLog log = DataLogManager.getLog();
-
-        transferLog = new DoubleLogEntry(log, "/Indexer/Transfer Velocity");
-        spindexerLog = new DoubleLogEntry(log, "/Indexer/Spindexer Velocity");
-    }
-
-    @Override 
+    @Override
     public void periodic() {
-        updateLogging();
-    }
-
-    private void updateLogging() {
-        transferLog.append(transferMotor.getVelocity().getValueAsDouble());
-        spindexerLog.append(spindexerMotor.getVelocity().getValueAsDouble());
+        telemetry.log("Transfer Velocity", transferMotor.getVelocity().getValue());
+        telemetry.log("Spindexer Velocity", spindexerMotor.getVelocity().getValue());
     }
 
     @Override
@@ -132,11 +118,9 @@ public class Indexer extends SubsystemBase {
         motorSim.setSupplyVoltage(RobotController.getBatteryVoltage());
 
         spindexerSim.setInput(motorSim.getMotorVoltageMeasure().in(Volts));
-        spindexerSim.update(Robot.kDefaultPeriod);
+        spindexerSim.update(TimedRobot.DEFAULT_PERIOD);
 
         motorSim.setRotorVelocity(spindexerSim.getOutput(0));
-
-        LightningShuffleboard.setDouble("Spindexer", "Velocity", getSpindexerVelocity().in(RotationsPerSecond));
     }
 
     /**
@@ -218,7 +202,7 @@ public class Indexer extends SubsystemBase {
     }
 
     public Command indexCommand(DoubleSupplier spindexerPower, DoubleSupplier transferPower) {
-        return new StartEndCommand(() -> setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble()), this::stop);
+        return new StartEndCommand(() -> setPower(spindexerPower.getAsDouble(), transferPower.getAsDouble()), () -> stop());
     }
 
     public Command autoIndex(DoubleSupplier spindexerPower, DoubleSupplier transferPower) {
