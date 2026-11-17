@@ -7,6 +7,10 @@ package first.robot;
 import org.wpilib.command2.Command;
 import org.wpilib.command2.CommandScheduler;
 import org.wpilib.framework.TimedRobot;
+import org.wpilib.networktables.MultiSubscriber;
+import org.wpilib.networktables.NetworkTableInstance;
+import org.wpilib.networktables.PubSubOption;
+import org.wpilib.system.DataLogManager;
 
 /**
  * The methods in this class are called automatically corresponding to each mode, as described in
@@ -18,11 +22,25 @@ public class Robot extends TimedRobot {
 
   private final RobotContainer robotContainer;
 
+  // Keeps every camera topic flowing from the vision server so it lands in the log.
+  @SuppressWarnings("unused")
+  private final MultiSubscriber cameraTopics;
+
   /**
    * This function is run when the robot is first started up and should be used for any
    * initialization code.
    */
   public Robot() {
+    // Log all NetworkTables traffic (including the camera tables) to a .wpilog for AdvantageScope.
+    // Logs go to /home/systemcore/logs (or a USB stick if one is plugged in).
+    DataLogManager.start();
+    DataLogManager.logNetworkTables(true);
+    // Subscribe to every Limelight table (limelightsc0, limelightshared, limelight_telemetry, ...)
+    // with SEND_ALL so each value is delivered and logged, not just the latest.
+    cameraTopics =
+        new MultiSubscriber(
+            NetworkTableInstance.getDefault(), new String[] {"/limelight"}, PubSubOption.SEND_ALL);
+
     // Instantiate our RobotContainer.  This will perform all our button bindings, and put our
     // autonomous chooser on the dashboard.
     robotContainer = new RobotContainer();

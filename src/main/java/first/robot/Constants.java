@@ -16,4 +16,18 @@ public final class Constants {
   public static class OperatorConstants {
     public static final int DRIVER_CONTROLLER_PORT = 0;
   }
+
+  public static class VisionConstants {
+    /** Systemcore USB camera name. "limelightsc0" is the first USB port. */
+    public static final String CAMERA_NAME = com.limelightvision.Limelight.SYSTEMCORE_USB0;
+
+    /** Tag used for turntable calibration. */
+    public static final int CALIBRATION_TAG_ID = 1;
+
+    /** Measured height of the calibration tag's center above the floor. MEASURE THIS. */
+    public static final double TAG_CENTER_HEIGHT_METERS = 0.30;
+
+    /** Ignore samples with pose ambiguity above this. */
+    public static final double MAX_AMBIGUITY = 0.2;
+  }
 }

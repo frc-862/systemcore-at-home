@@ -10,6 +10,7 @@ import org.wpilib.command2.button.Trigger;
 import first.robot.Constants.OperatorConstants;
 import first.robot.commands.Autos;
 import first.robot.subsystems.TestSubsystem;
+import first.robot.subsystems.VisionSubsystem;
 
 /**
  * This class is where the bulk of the robot should be declared. Since Command-based is a
@@ -20,6 +21,7 @@ import first.robot.subsystems.TestSubsystem;
 public class RobotContainer {
   // The robot's subsystems and commands are defined here...
   private final TestSubsystem testSubsystem = new TestSubsystem();
+  private final VisionSubsystem visionSubsystem = new VisionSubsystem();
 
   private final CommandGamepad driverController =
       new CommandGamepad(OperatorConstants.DRIVER_CONTROLLER_PORT);
