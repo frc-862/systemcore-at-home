@@ -1,4 +1,4 @@
-# WPILib 2027 lessons learned
+# +WPILib 2027 lessons learned
 
 Lessons from porting the 2026 Mirage robot to WPILib 2027 alpha7, Commands v3, Telemetry and
 SystemCore. Each item shows the old pattern (2026) and the new pattern (2027).
@@ -357,9 +357,14 @@ Coroutines use JDK continuations. Only schedule or cancel commands from the thre
 
 ---
 
-## Telemetry
+## +Telemetry
 
-### Logging a value
+Telemetry has been simplified. One call to send values to the dashboard and to a file.
+
+- NetworkTables under `/Telemetry` by default.
+- `DataLogManager.start()` records it to a file.
+
+### +Logging a value
 
 ```java
 // 2026
@@ -370,7 +375,7 @@ entry.append(bias);
 Telemetry.log("Shooter/Bias", bias);
 ```
 
-### Using a table per mechanism
+### +Using a table per mechanism
 
 ```java
 // 2027
@@ -388,7 +393,7 @@ SmartDashboard.putNumber("Hood/Angle", angle.in(Degrees));
 Telemetry.log("Hood/Angle", angle);
 ```
 
-### Logging measures (units are kept)
+### +Logging measures (units are kept)
 
 ```java
 // 2026
@@ -398,7 +403,7 @@ log.append(velocity.in(RotationsPerSecond));
 telemetry.log("Velocity", velocity);
 ```
 
-### Logging struct types
+### +Logging struct types
 
 ```java
 // 2026
@@ -426,16 +431,12 @@ SmartDashboard.putData("Hood/Mech2d", mech2d);
 telemetry.log("Mech2d", mech2d);
 ```
 
-### Other TelemetryLoggable types
+### +Other TelemetryLoggable types
 
 `Field2d`, `Mechanism2d`, `PIDController` and `XboxController` implement `TelemetryLoggable`.
 
-### Where the data goes
 
-- NetworkTables under `/Telemetry` by default.
-- `DataLogManager.start()` records it to a file.
-
-### Dashboard inputs are Tunables
+### +Dashboard inputs are Tunables
 
 ```java
 // 2026
@@ -446,7 +447,33 @@ TunableDouble bias = Tunables.addDouble("Cannon/Bias", 8);   // create once
 bias.get();                                                  // read anywhere
 ```
 
-Tunables are published under `/Tunables`.
+Tunables are published under `/Tunables`. The robot loop updates them automatically, so `get()`
+always returns the latest dashboard value.
+
+### +Other tunable types
+
+```java
+// 2027
+TunableInt id = Tunables.addInt("Cannon/Id", 1);
+TunableBoolean enabled = Tunables.addBoolean("Cannon/Enabled", false);
+
+// Expose an existing field without a Tunable object
+Tunables.publishDouble("Cannon/Bias", () -> bias, v -> bias = v);
+```
+
+### +Running a command from the dashboard
+
+This is useful for zeroing a mechanism or running a calibration routine from Elastic without
+binding a gamepad button. In Elastic, open `/Tunables` and drag the entry onto a tab. Clicking
+it starts the command, and clicking it again cancels it.
+
+```java
+// 2026
+SmartDashboard.putData("Hood/Zero", hood.zero());
+
+// 2027, Commands v2: a Command is a ComplexTunable, so publish it directly
+Tunables.publish("Hood/Zero", hood.zero().ignoringDisable(true));
+```
 
 ### Gone
 
@@ -483,9 +510,11 @@ hard-coded auto.
 
 ---
 
-## Driver station
+## +Driver station
 
-### Robot mode
+Getting info about the match or robot state.
+
+### +Robot mode
 
 ```java
 // 2026
@@ -497,17 +526,17 @@ RobotState.isEnabled();
 RobotState.isTeleop();
 ```
 
-### Alliance
+### +Alliance
 
 ```java
 // 2026
 DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Blue;
 
-// 2027: top-level enum with upper-case values
+// 2027
 MatchState.getAlliance().orElse(Alliance.BLUE) == Alliance.BLUE;
 ```
 
-### Match time and game data
+### +Match time and game data
 
 ```java
 // 2026
@@ -519,7 +548,7 @@ MatchState.getMatchTime();
 MatchState.getGameData().orElse("");
 ```
 
-### Test mode is utility mode
+### +Test mode is now utility mode
 
 ```java
 // 2026
@@ -531,9 +560,9 @@ public void utilityInit() { }
 
 ---
 
-## Controllers
+## +Controllers
 
-### Button names
+### +Button names
 
 ```java
 // 2026
@@ -545,7 +574,7 @@ driver.getMenuButton();
 driver.getViewButton();
 ```
 
-### Trigger axes
+### +Trigger axes
 
 ```java
 // 2026
@@ -555,7 +584,7 @@ driver.getLeftTriggerAxis();
 driver.getLeftTrigger();
 ```
 
-### D-pad
+### +D-pad
 
 ```java
 // 2026
@@ -578,9 +607,9 @@ hid.setRumble(RumbleType.RIGHT_RUMBLE, 1);
 
 ---
 
-## Math and geometry
+## +Math and geometry
 
-### Constants use UPPER_CASE
+### +Constants use UPPER_CASE
 
 ```java
 // 2026
@@ -590,27 +619,18 @@ Rotation2d.kZero;   Color.kWhite;   TimedRobot.kDefaultPeriod;
 Rotation2d.ZERO;    Color.WHITE;    TimedRobot.DEFAULT_PERIOD;
 ```
 
-### ChassisSpeeds is ChassisVelocities
+### +Field coordinates are changing
 
-```java
-// 2026
-ChassisSpeeds s;  s.vxMetersPerSecond;  s.omegaRadiansPerSecond;
+Not in alpha7 yet. This was merged in
+[allwpilib#9590](https://github.com/wpilibsuite/allwpilib/pull/9590) for a later 2027 release.
 
-// 2027
-ChassisVelocities v;  v.vx;  v.omega;
-```
+- The origin moves to the center of the field instead of the blue alliance corner.
+- +X points toward the blue alliance wall, so field-relative poses are rotated 180° compared to 2026.
+- AprilTag layouts, including past years, are converted to the new system.
+- It's a silent break: NetworkTables and DataLog poses don't say which system they use, so
+  dashboards and any hard-coded field poses must be updated.
 
-### SwerveModuleState is SwerveModuleVelocity
-
-```java
-// 2026
-state.speedMetersPerSecond;
-
-// 2027
-velocity.velocity;
-```
-
-### Translation2d angle is optional
+### +Translation2d angle is optional
 
 ```java
 // 2026
@@ -642,9 +662,9 @@ Math.clamp(x, -1, 1);
 
 ---
 
-## Units
+## +Units
 
-### Mutable measures are gone
+### +Mutable measures are gone
 
 ```java
 // 2026
@@ -660,9 +680,9 @@ bias = Degrees.zero();
 
 ---
 
-## Simulation
+## +Simulation
 
-### LinearSystemId is Models
+### +LinearSystemId is Models
 
 ```java
 // 2026
@@ -684,7 +704,7 @@ LinearSystemId.createDCMotorSystem(motor, J, gearing);
 Models.singleJointedArmFromPhysicalConstants(motor, J, gearing);
 ```
 
-### Sim getters lost unit suffixes
+### +Sim getters lost unit suffixes
 
 ```java
 // 2026
@@ -723,9 +743,9 @@ Timer.getTimestamp();
 
 ---
 
-## SystemCore and CTRE Phoenix 6
+## +SystemCore and CTRE Phoenix 6
 
-### CAN buses are ports, not names
+### +CAN buses are ports, not names
 
 ```java
 // 2026
@@ -735,7 +755,7 @@ new CANBus("Canivore");
 new CANBus(CANPort.CAN_S0);
 ```
 
-### Swerve CAN bus
+### +Swerve CAN bus
 
 ```java
 // 2026
@@ -745,7 +765,7 @@ new SwerveDrivetrainConstants().withCANBusName(bus.getName());
 new SwerveDrivetrainConstants().withNetwork(bus);
 ```
 
-### Swerve state fields
+### +Swerve state fields
 
 ```java
 // 2026
@@ -755,7 +775,17 @@ state.Speeds;   state.ModuleStates;
 state.Velocity; state.ModuleVelocities;
 ```
 
-### Operator perspective
+### +ChassisSpeeds is now ChassisVelocities
+
+```java
+// 2026
+ChassisSpeeds s;  s.vxMetersPerSecond;  s.omegaRadiansPerSecond;
+
+// 2027
+ChassisVelocities v;  v.vx;  v.omega;
+```
+
+### +Operator perspective
 
 ```java
 // 2026
@@ -787,8 +817,9 @@ Phoenix6-26.70.0-alpha-2.json   (wpilibYear 2027_alpha7)
 
 ---
 
-## Third-party libraries (no 2027 release yet)
+## +Third-party libraries (no 2027 release yet)
 
 - **PathPlanner:** autos, `AutoBuilder` and `NamedCommands` removed.
 - **PhotonVision:** vision pose updates removed.
 - **maple-sim:** physics sim removed; swerve uses CTRE `updateSimState` instead.
+- **YASS:** 4 libraries for swerve and mechanisms https://www.yassrobotics.com/
